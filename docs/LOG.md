@@ -175,3 +175,5 @@ sample); method-specific boxes; middle double-click bug fixed (left-only double-
 Scale tick params p{n}scl / cp{k}scl + PartialsTable; per-page Dice/Mutate/Reset + Init; Reset
 edits clears ticks + calculator-aimed mods. Window 1200×880. 66/66 checks.
 **Answered in chat:** Seed-12, Magnet, Bend range, Chord size/step, Mutate.
+- 14:44 check-in: CI run #10 (Seed v0.4.0) green incl. 66 tests; Release `build-10` published.
+  (Note: the GitHub MCP release list sorts by tag name, so build-10 appears after build-5.)

@@ -6,8 +6,8 @@ _Last updated: 2026-09-26 (session 1)_
 Design, feature list and HOW TO USE: `docs/PLAYGROUND.md`. User's job on return: try it, decide
 what to keep / delete / split into a new synth / change. 66/66 headless checks pass.
 `SeedTests --bench` measures CPU.
-**Download: Release `build-9` (v0.3.1, green on Windows incl. all 59 tests):**
-https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-9
+**Download: Release `build-10` (v0.4.0, green on Windows incl. all 66 tests):**
+https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-10
 
 ## What exists
 - **Seed v0.3.0 playground** (`plugins/Seed/`): calculator (dissonance + consonance, hand edits

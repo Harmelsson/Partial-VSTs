@@ -59,3 +59,19 @@ synth, or change." ~1.5 h of experimentation._
   step counts SCALE DEGREES (great with Consonance scales). *Wander* (Timbre): every partial
   drifts on its own random path (± cents, rate). *Scramble* (Timbre): partials swap loudness.
 - Everything above is a host parameter → automatable in FL (≈300 params, names say what they are).
+
+## Recipes to start from (for curating)
+1. **Consonant chord machine**: Method = Consonance · Key mode = Scale · Chord size 3, step 1 →
+   every key plays three notes of a scale in which every pair fuses.
+2. **Uncomfortable room**: Reverb send 60 % · Roughness 100 % · Decay 8 s → the tail rings on the
+   scale's notes and beats between your ears. Roughness 0 % = the same room, eerily pure.
+3. **Barber-pole partials**: Delay send 70 % · Picks = Odd · Spiral +700 c · Feedback 70 % → only
+   the odd partials echo, each repeat a fifth higher.
+4. **Living swarm**: Wander 60 c · Wander rate 0.3 Hz · Shimmer 40 % · Spread 100 %.
+5. **Inharmonic bell pluck**: Seed 2.8 · Sustain 0 · Decay 1500 ms · Freq shift +37 Hz.
+6. **Tuning that breathes**: Mod 1 = Smooth rnd → Seed, depth 10 %, rate 0.1 Hz · Key mode Scale
+   · Glide 300 ms → held chords slide as the scale itself moves (notes may be born / die).
+7. **Hand-built timbre**: Partials 8 · right-click partials 2 and 4 (mute) · double-click to add
+   two custom partials · drag them around while a Drone plays.
+8. **Save a tuning, swap the sound**: build a scale you like → Save as… → Dice sound a few
+   times → set *Load: Tuning* and step through presets: the tuning comes back, the sound stays.

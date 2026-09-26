@@ -67,3 +67,10 @@ gentler scrubbing/scrolling.
 - docs/SEED_NOTE_LIFE.md: 6 ideas for notes born/dying while held (user asked for ideas).
 **Worked first try:** compile (only -Wfloat-equal warnings, fixed with juce::exactlyEqual).
 **Not verified yet:** the Windows CI build itself, and anything in real FL Studio.
+
+## 2026-09-26 — session 1 — user can't find the build → Releases
+**User:** looked at the repo front page (main branch), saw no "green" anything, didn't know where
+builds live. Also: on note birth/death — "we will test out different ideas, there is no harm in
+creating variety" → implement several as selectable modes.
+**Done:** CI publishes every successful build as a GitHub Release (front page → Releases box);
+TESTING.md rewritten accordingly. Windows CI run #1: configure OK (4.5 min), build in progress.

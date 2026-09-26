@@ -31,3 +31,6 @@ Format: **topic** — what happened → what to do instead. (date)
   `-DFETCHCONTENT_BASE_DIR=/home/user/.cache/pvst-deps` so JUCE isn't re-cloned per build dir.
 - Windows builds link the C++ runtime statically (`CMAKE_MSVC_RUNTIME_LIBRARY`) so the user never
   needs a VC++ redistributable.
+- **User couldn't find the build** (2026-09-26): "Actions → Artifacts" is too hidden. Builds are now
+  published as GitHub Releases (front page, right side). Windows CI timing: configure ~4.5 min
+  (JUCE clone + juceaide), build with LTO ~10+ min.

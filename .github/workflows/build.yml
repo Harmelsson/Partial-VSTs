@@ -1,10 +1,14 @@
-# Builds every plugin for Windows on each push, runs the headless tests, and uploads a zip the
-# user downloads from the Actions tab ("Artifacts" at the bottom of a run).
+# Builds every plugin for Windows on each push, runs the headless tests, and publishes the zip
+# as a GitHub Release ("build-N"), so the user finds it in the "Releases" box on the repo's front
+# page. (It is also kept as an Actions artifact, as a backup.)
 name: build
 
 on:
   push:
   workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create the Release
 
 jobs:
   windows:
@@ -35,8 +39,22 @@ jobs:
           Copy-Item -Recurse build/plugins/*/*_artefacts/Release/VST3/*.vst3 "$out/VST3/"
           Copy-Item build/plugins/*/*_artefacts/Release/Standalone/*.exe "$out/Standalone/"
           Copy-Item docs/TESTING.md "$out/HOW_TO_INSTALL.md"
+          Compress-Archive -Path "$out/*" -DestinationPath "PartialVSTs-build-${{ github.run_number }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
           name: PartialVSTs-windows-build-${{ github.run_number }}
           path: dist
+
+      - name: Publish as a Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Build ${{ github.run_number }} (${{ github.ref_name }})"
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          body: |
+            Automatic build from commit ${{ github.sha }} on branch `${{ github.ref_name }}`.
+            Download the zip below, then follow HOW_TO_INSTALL.md inside it.
+            What changed / what to test: see docs/STATUS.md on that branch.
+          files: PartialVSTs-build-${{ github.run_number }}.zip

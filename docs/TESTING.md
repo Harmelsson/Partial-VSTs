@@ -1,9 +1,13 @@
 # How to install and test the plugins (Windows + FL Studio)
 
 ## 1. Download a build
-1. Open the repo on GitHub → **Actions** tab → click the newest run of **build** with a green ✓.
-2. Scroll to **Artifacts** at the bottom → click `PartialVSTs-windows-build-N` → a zip downloads.
+1. Open the repo's front page on GitHub. On the right side there is a **Releases** box.
+2. Click the newest release (**Build N**), then under **Assets** click `PartialVSTs-build-N.zip`.
 3. Unzip it. Inside: `VST3/` (the plugins), `Standalone/` (the same plugins as normal apps).
+
+A release only appears once a build has fully succeeded (compiled + all tests passed).
+To see a build that's still running: the **Actions** tab at the top of the repo page
+(yellow dot = running, green ✓ = done, red ✗ = failed — the agent fixes red ones).
 
 ## 2. Install into FL Studio
 1. **Close FL Studio** (Windows locks plugin files that are in use).

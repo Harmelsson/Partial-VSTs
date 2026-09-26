@@ -7,6 +7,7 @@
 juce_add_console_app(SeedTests PRODUCT_NAME "SeedTests")
 target_sources(SeedTests PRIVATE
     SeedTests.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/Seed/Source/SeedParams.cpp
     ${CMAKE_SOURCE_DIR}/plugins/Seed/Source/PluginProcessor.cpp
     ${CMAKE_SOURCE_DIR}/plugins/Seed/Source/PluginEditor.cpp)
 target_include_directories(SeedTests PRIVATE ${CMAKE_SOURCE_DIR}/plugins/Seed/Source)

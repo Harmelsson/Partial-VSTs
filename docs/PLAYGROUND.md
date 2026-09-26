@@ -28,11 +28,11 @@ synth, or change." ~1.5 h of experimentation._
 - **Magnet**: Seed-12 keys pulled toward the nearest playable note by **Magnet** % (idea 5).
 
 ## Progress (update as phases land)
-- [ ] A core: consonance copy, edited partials/notes model, processor-owned calculator worker,
+- [x] A core (compiles; tests being updated): consonance copy, edited partials/notes model, processor-owned calculator worker,
       key modes, glide, life, pitch/freq shift
-- [ ] B plot editing: drag/add/remove partials + notes, scale table toggles, orange markers
-- [ ] C timbre: additive tools, stereo spread, noise, filter
-- [ ] D FX: partial delay, rough reverb
-- [ ] E modulators + dice/mutate
-- [ ] F presets
-- [ ] G tabs UI, snapshot, docs
+- [x] B plot editing (written, needs snapshot check): drag/add/remove partials + notes, scale table toggles, orange markers
+- [x] C timbre: additive tools, stereo spread, noise, filter
+- [x] D FX: partial delay, rough reverb
+- [x] E modulators + dice/mutate
+- [x] F presets
+- [ ] G tabs UI (written) +, snapshot, docs

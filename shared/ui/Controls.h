@@ -301,4 +301,133 @@ private:
     juce::String texts[2];
     juce::ParameterAttachment attachment;
 };
+/// N-way segmented switch for a choice (or int) parameter: ArtHar's "Seed | Hand" style.
+class SegmentedChoice : public juce::Component
+{
+public:
+    SegmentedChoice (juce::RangedAudioParameter& p, juce::String labelText, juce::StringArray optionNames)
+        : param (p), label (std::move (labelText)), names (std::move (optionNames)),
+          attachment (p, [this] (float) { repaint(); }, nullptr)
+    {
+        attachment.sendInitialUpdate();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto b = getLocalBounds();
+        g.setColour (theme::dim());
+        g.setFont (theme::sans (12.5f));
+        g.drawText (label, b.removeFromTop (16), juce::Justification::bottomLeft);
+        b.removeFromTop (3);
+        b = b.withHeight (juce::jmin (b.getHeight(), 28));
+        const int sel = index();
+        const int n = names.size();
+        for (int i = 0; i < n; ++i)
+        {
+            auto cell = b.withX (b.getX() + b.getWidth() * i / n).withWidth (b.getWidth() / n + (i == n - 1 ? b.getWidth() % n : 0));
+            g.setColour (i == sel ? theme::selected() : theme::boxFill());
+            g.fillRect (cell);
+            g.setColour (theme::frame());
+            g.drawRect (cell, 1);
+            g.setColour (i == sel ? theme::fg : theme::dim());
+            g.setFont (theme::sans (13.0f));
+            g.drawFittedText (names[i], cell.reduced (3, 0), juce::Justification::centred, 1, 0.8f);
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isMiddleButtonDown() || e.mods.isAltDown()) { attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue())); return; }
+        const int n = names.size();
+        const int i = juce::jlimit (0, n - 1, (int) (e.position.x * (float) n / (float) juce::jmax (1, getWidth())));
+        attachment.setValueAsCompleteGesture ((float) (param.getNormalisableRange().start + (float) i));
+    }
+
+private:
+    int index() const { return juce::roundToInt (param.convertFrom0to1 (param.getValue()) - param.getNormalisableRange().start); }
+    juce::RangedAudioParameter& param;
+    juce::String label;
+    juce::StringArray names;
+    juce::ParameterAttachment attachment;
+};
+
+/// Dropdown for a choice parameter with many options (ArtHar combo style: "Dissonance curve ▼").
+class ChoiceBox : public juce::Component
+{
+public:
+    ChoiceBox (juce::RangedAudioParameter& p, juce::String labelText, juce::StringArray optionNames)
+        : param (p), label (std::move (labelText)), names (std::move (optionNames)),
+          attachment (p, [this] (float) { repaint(); }, nullptr)
+    {
+        attachment.sendInitialUpdate();
+        setRepaintsOnMouseActivity (true);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto b = getLocalBounds();
+        g.setColour (theme::dim());
+        g.setFont (theme::sans (12.5f));
+        g.drawText (label, b.removeFromTop (16), juce::Justification::bottomLeft);
+        b.removeFromTop (3);
+        b = b.withHeight (juce::jmin (b.getHeight(), 28));
+        g.setColour (theme::boxFill());
+        g.fillRect (b);
+        g.setColour (isMouseOver() ? theme::mix (0.4f) : theme::frame());
+        g.drawRect (b, 1);
+        g.setColour (theme::text());
+        g.setFont (theme::sans (13.5f));
+        g.drawFittedText (names[index()], b.reduced (8, 0).withTrimmedRight (14), juce::Justification::centredLeft, 1, 0.8f);
+        juce::Path tri;
+        const auto a = b.removeFromRight (18).toFloat().withSizeKeepingCentre (8.0f, 5.0f);
+        tri.addTriangle (a.getX(), a.getY(), a.getRight(), a.getY(), a.getCentreX(), a.getBottom());
+        g.setColour (theme::mix (0.6f));
+        g.fillPath (tri);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isMiddleButtonDown() || e.mods.isAltDown()) { attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue())); return; }
+        juce::PopupMenu m;
+        for (int i = 0; i < names.size(); ++i) m.addItem (i + 1, names[i], true, i == index());
+        juce::Component::SafePointer<ChoiceBox> safe (this);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [safe] (int r) {
+            if (safe != nullptr && r > 0)
+                safe->attachment.setValueAsCompleteGesture ((float) (safe->param.getNormalisableRange().start + (float) (r - 1)));
+        });
+    }
+
+private:
+    int index() const { return juce::jlimit (0, names.size() - 1, juce::roundToInt (param.convertFrom0to1 (param.getValue()) - param.getNormalisableRange().start)); }
+    juce::RangedAudioParameter& param;
+    juce::String label;
+    juce::StringArray names;
+    juce::ParameterAttachment attachment;
+};
+
+/// Plain ArtHar-style text button ("Light", "Reset", "Help & findings").
+class FlatButton : public juce::Component
+{
+public:
+    explicit FlatButton (juce::String t) : text (std::move (t)) { setRepaintsOnMouseActivity (true); }
+    std::function<void()> onClick;
+    void setText (const juce::String& t) { text = t; repaint(); }
+    void paint (juce::Graphics& g) override
+    {
+        auto b = getLocalBounds();
+        g.setColour (isMouseButtonDown() ? theme::selected() : isMouseOver() ? theme::mix (0.12f) : theme::boxFill());
+        g.fillRect (b);
+        g.setColour (isMouseOver() ? theme::mix (0.45f) : theme::frame());
+        g.drawRect (b, 1);
+        g.setColour (theme::text());
+        g.setFont (theme::sans (13.0f));
+        g.drawFittedText (text, b.reduced (4, 0), juce::Justification::centred, 1, 0.8f);
+    }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (getLocalBounds().contains (e.getPosition()) && onClick) onClick();
+    }
+private:
+    juce::String text;
+};
 } // namespace pvst

@@ -22,6 +22,8 @@ inline juce::Colour dim()       { return mix (0.55f); } // secondary labels
 inline juce::Colour text()      { return mix (0.92f); } // normal text
 inline juce::Colour boxFill()   { return mix (0.04f); } // number boxes, inactive buttons
 inline juce::Colour selected()  { return mix (0.28f); } // active segment of a toggle
+/// The ONE accent colour: hand-modified values (ArtHar v1.1 marks moved notes orange).
+inline const juce::Colour modified { 0xffe8923a };
 
 /// UTF-8 text literal -> juce::String. Plain `const char*` is read as Latin-1 by JUCE, which turns
 /// "·" into "Â·" — always wrap non-ASCII literals in this.

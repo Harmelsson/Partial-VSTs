@@ -1,40 +1,25 @@
 #pragma once
-// Seed — the plugin shell around SeedEngine: parameters, MIDI, safety stage, state save/load.
+// Seed — the plugin shell. Owns the two halves and keeps them apart:
+//   CALCULATOR: the tuning params + a background worker (xen::CalculatorWorker) that turns them
+//               into a scale. Runs from a message-thread timer (pumpCalculator), never on the
+//               audio thread. The raw scale reaches the audio thread through a try-lock handoff.
+//   SYNTH:      SeedEngine (voices), FX (Partial Delay, Rough Reverb), modulators, safety stage.
+// Also: presets (All / Tuning / Sound), Dice / Mutate, and state save/load.
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "SeedEngine.h"
+#include "SeedParams.h"
+#include "dsp/Modulator.h"
+#include "dsp/PartialDelay.h"
+#include "dsp/RoughReverb.h"
 #include "dsp/SafetyStage.h"
+#include "xen/CalculatorWorker.h"
 
-namespace seed
-{
-/// Stable parameter IDs. NEVER rename one: FL Studio projects and automation store these.
-namespace ids
-{
-    inline constexpr const char* seed = "seed";
-    inline constexpr const char* partials = "partials";
-    inline constexpr const char* rolloff = "rolloff";
-    inline constexpr const char* attack = "attack";
-    inline constexpr const char* release = "release";
-    inline constexpr const char* gain = "gain";
-    inline constexpr const char* keysFollow = "keysFollow";
-    inline constexpr const char* drone = "drone";
-    inline constexpr const char* droneNote = "droneNote";
-    // v0.2.0
-    inline constexpr const char* fundamental = "fundamental";
-    inline constexpr const char* minDip = "minDip";
-    inline constexpr const char* decay = "decay";
-    inline constexpr const char* sustain = "sustain";
-    inline constexpr const char* velocity = "velocity";
-} // namespace ids
-
-/// Version shown in the UI. Bump on EVERY change handed to the user.
-inline constexpr const char* kVersion = "0.2.0";
-} // namespace seed
-
-class SeedProcessor : public juce::AudioProcessor
+class SeedProcessor : public juce::AudioProcessor, private juce::Timer
 {
 public:
     SeedProcessor();
+    ~SeedProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -44,51 +29,91 @@ public:
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
-
     const juce::String getName() const override { return "Seed"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 2.0; }
-
+    double getTailLengthSeconds() const override { return 8.0; }
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram (int) override {}
     const juce::String getProgramName (int) override { return {}; }
     void changeProgramName (int, const juce::String&) override {}
-
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState apvts;
-    static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+    juce::RangedAudioParameter& param (const juce::String& id) const { return *apvts.getParameter (id); }
 
-    /// For the UI: how many voices are sounding, and how many safety faults happened.
+    // ---- Calculator (message thread) ------------------------------------------------------
+    /// Sends the current (modulated) calculator settings to the worker and collects results.
+    /// Called by a 30 Hz timer; tests call it directly.
+    void pumpCalculator();
+    xen::CalculatorSettings currentCalculatorSettings() const;
+    const xen::CalculatorOutput& calculatorOutput() const { return calcOut; }
+    bool calculatorBusy() const { return worker.isBusy(); }
+    bool hasCalculatorResult() const { return calcSeen > 0; }
+    /// The latest scale with the note edits applied (what the keyboard plays).
+    xen::FinalScale finalScale() const;
+    xen::NoteEdits noteEditsFromParams() const;
+    xen::PartialEdits partialEditsFromParams() const;
+
+    // ---- Presets (message thread) -----------------------------------------------------------
+    enum class Scope { All = 0, Tuning = 1, Sound = 2 };
+    static juce::File presetFolder();
+    juce::Array<juce::File> listPresets() const;
+    bool savePreset (const juce::String& name);
+    bool loadPreset (const juce::File& file, Scope scope);
+    juce::String currentPresetName;
+
+    // ---- Chaos (message thread) ---------------------------------------------------------------
+    /// amount 1 = Dice (fully random), < 1 = Mutate (nudge). Scope chooses the group.
+    void randomize (Scope scope, double amount);
+
+    // ---- For the UI -----------------------------------------------------------------------------
     std::atomic<int> uiActiveVoices { 0 };
+    std::array<std::atomic<float>, seed::kNumMods> uiModValue {};
     int safetyFaults() const { return safety.faultCount(); }
 
 private:
-    void syncParams();
+    void timerCallback() override { pumpCalculator(); }
+    double eff (juce::RangedAudioParameter* p, int modTarget) const;
+    void buildEngineParams (double blockSeconds);
+    void updateScaleOnAudioThread();
     void handleMidi (const juce::MidiMessage& m);
     void updateDrone();
 
+    // Engine + FX + safety.
     seed::Engine engine;
+    seed::EngineParams ep;
+    pvst::PartialDelay delay;
+    pvst::RoughReverb reverb;
     pvst::SafetyStage safety;
-    seed::EngineParams params;
-    std::vector<float> mono;
+    std::array<pvst::Modulator, seed::kNumMods> mods;
+    std::vector<double> modOffset;                 // per target index, normalised units
+    std::vector<float> dryL, dryR, busA, busB;
+    int droneSounding = -1;
+    double bendNorm = 0.0;                          // pitch wheel, -1..1
+    double sampleRateHz = 48000.0;
 
-    // Drone: a virtual held note, owned by the plugin rather than the piano roll.
-    int droneSounding = -1; // key the drone is currently holding, -1 = none
-    double pitchBendCents = 0.0;
+    // Calculator worker + audio handoff.
+    xen::CalculatorWorker worker;
+    xen::CalculatorOutput calcOut;
+    uint64_t calcSeen = 0;
+    juce::SpinLock scaleLock;
+    xen::RawScale sharedRaw, audioRaw;
+    uint64_t sharedVersion = 0, audioVersion = 0;
+    // Effective (modulated) calculator inputs, published by the audio thread for pumpCalculator.
+    std::atomic<float> effSeed { -1.0f }, effFund { -1.0f }, effRolloff { -1.0f }, effMinDip { -1.0f };
 
-    // Cached raw parameter pointers (fast, lock-free reads on the audio thread).
-    std::atomic<float>* pSeed = nullptr; std::atomic<float>* pPartials = nullptr;
-    std::atomic<float>* pRolloff = nullptr; std::atomic<float>* pAttack = nullptr;
-    std::atomic<float>* pRelease = nullptr; std::atomic<float>* pGain = nullptr;
-    std::atomic<float>* pKeysFollow = nullptr; std::atomic<float>* pDrone = nullptr;
-    std::atomic<float>* pDroneNote = nullptr; std::atomic<float>* pFundamental = nullptr;
-    std::atomic<float>* pDecay = nullptr; std::atomic<float>* pSustain = nullptr;
-    std::atomic<float>* pVelocity = nullptr;
+    // Cached parameter pointers.
+    juce::RangedAudioParameter* P (const char* id) const { return apvts.getParameter (id); }
+    std::array<juce::RangedAudioParameter*, xen::kSeriesPartials> pLvl {}, pPos {};
+    std::array<juce::RangedAudioParameter*, xen::kCustomPartials> cpOn {}, cpC {}, cpL {};
+    std::array<juce::RangedAudioParameter*, xen::kEditableDegrees> nOn {}, nOff {};
+    std::array<juce::RangedAudioParameter*, xen::kCustomNotes> cnOn {}, cnC {};
+    std::array<juce::RangedAudioParameter*, seed::kNumMods> mShape {}, mRate {}, mDepth {}, mTarget {};
+    std::vector<juce::RangedAudioParameter*> targetParams; // index = mod target
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SeedProcessor)
 };

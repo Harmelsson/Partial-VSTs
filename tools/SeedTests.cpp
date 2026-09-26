@@ -529,6 +529,34 @@ void testChaosSafety()
     check (std::abs (s1 - s2) > 0.5, "mod 1 (square) on Seed swings the calculator's seed", juce::String (s1, 3) + " -> " + juce::String (s2, 3));
 }
 
+void testChaosToys()
+{
+    std::cout << "chaos toys (chord, wander, scramble)" << std::endl;
+    Rig r; // 12-EDO chord of 3, step 4 keys: A4 + C#5 + F5
+    r.set (seed::ids::chordSize, 3.0f);
+    r.set (seed::ids::chordStep, 4.0f);
+    auto x = tail (r.render (0.8, Rig::noteOn ({ 69 })), 0.4);
+    check (toneAmp (x, 440.0) > 0.01 && toneAmp (x, 554.365) > 0.01 && toneAmp (x, 698.456) > 0.01 && r.proc->uiActiveVoices.load() == 3,
+           "chord 3 x 4 keys: one key plays A, C#, F");
+    auto off = r.render (1.5, Rig::noteOff (69));
+    check (r.proc->uiActiveVoices.load() == 0, "releasing the key releases the whole chord");
+
+    Rig w; // wander pulls partial 2 away from exactly 880 Hz
+    w.set (seed::ids::wander, 200.0f);
+    w.set (seed::ids::wanderRate, 5.0f);
+    auto y = tail (w.render (2.0, Rig::noteOn ({ 69 })), 0.5);
+    Rig plain;
+    auto z = tail (plain.render (2.0, Rig::noteOn ({ 69 })), 0.5);
+    check (toneAmp (y, 880.0) < 0.5 * toneAmp (z, 880.0) && toneAmp (y, 440.0) > 0.5 * toneAmp (z, 440.0),
+           "wander moves partials (not the fundamental)", juce::String (toneAmp (y, 880.0) / toneAmp (z, 880.0), 3));
+
+    Rig sc;
+    sc.set (seed::ids::scramble, 100.0f);
+    sc.set (seed::ids::partials, 32.0f);
+    auto q = sc.render (1.0, Rig::noteOn ({ 48, 60 }, 1.0f));
+    check (allFinite (q) && peakOf (q) <= pvst::SafetyStage::kCeiling + 1e-6f, "scramble 100%: finite, under the ceiling");
+}
+
 void testPresets()
 {
     std::cout << "presets" << std::endl;
@@ -579,9 +607,35 @@ void snapshot (const juce::File& file)
 }
 } // namespace
 
+/// --bench: how much CPU a heavy patch costs (1.0 = one core fully busy in real time).
+void bench()
+{
+    struct Case { const char* name; int voices; int partials; bool heavy; };
+    for (auto c : { Case { "1 voice, 16 partials, plain", 1, 16, false }, Case { "8 voices, 16 partials, plain", 8, 16, false },
+                    Case { "8 voices, 64 partials, filter+sends+FX", 8, 64, true }, Case { "16 voices, 64 partials, filter+sends+FX", 16, 64, true } })
+    {
+        Rig r;
+        r.set (seed::ids::partials, (float) c.partials);
+        if (c.heavy)
+        {
+            r.set (seed::ids::filterMode, 1.0f); r.set (seed::ids::sendA, 50.0f); r.set (seed::ids::sendB, 50.0f);
+            r.set (seed::ids::spread, 80.0f); r.set (seed::ids::shimmer, 50.0f); r.set (seed::ids::spiral, 300.0f);
+        }
+        juce::MidiBuffer m;
+        for (int v = 0; v < c.voices; ++v) m.addEvent (juce::MidiMessage::noteOn (1, 40 + v * 3, 0.8f), 0);
+        r.render (0.2, m);
+        const auto t0 = juce::Time::getMillisecondCounterHiRes();
+        r.render (10.0);
+        const double secs = (juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0;
+        std::cout << "  " << c.name << ": " << juce::String (100.0 * secs / 10.0, 1) << "% of one core" << std::endl;
+    }
+}
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juce;
+    for (int i = 1; i < argc; ++i)
+        if (juce::String (argv[i]) == "--bench") { bench(); return 0; }
     testMath();
     testSpectrum();
     testDynamic();
@@ -598,6 +652,7 @@ int main (int argc, char** argv)
     testPitch();
     testChaosSafety();
     testPresets();
+    testChaosToys();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")
             snapshot (juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]));

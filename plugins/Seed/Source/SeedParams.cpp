@@ -128,6 +128,14 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterFloat> (L, ParameterID { ids::rough, v3 }, "Roughness", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 60.0f, fmt (0, "%"));
     add<AudioParameterFloat> (L, ParameterID { ids::rvbLevel, v3 }, "Reverb level", NormalisableRange<float> (-48.0f, 6.0f, 0.0f), -6.0f, fmt (1, "dB"));
 
+    // Chaos toys (v0.3.1).
+    const int v31 = 4;
+    add<AudioParameterInt> (L, ParameterID { ids::chordSize, v31 }, "Chord size", 1, 5, 1);
+    add<AudioParameterInt> (L, ParameterID { ids::chordStep, v31 }, "Chord step (keys)", 1, 12, 2);
+    add<AudioParameterFloat> (L, ParameterID { ids::wander, v31 }, "Partial wander", NormalisableRange<float> (0.0f, 400.0f, 0.0f), 0.0f, fmt (1, "c"));
+    add<AudioParameterFloat> (L, ParameterID { ids::wanderRate, v31 }, "Wander rate", skewed (0.02f, 20.0f, 1.0f), 0.5f, fmt (2, "Hz"));
+    add<AudioParameterFloat> (L, ParameterID { ids::scramble, v31 }, "Loudness scramble", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 0.0f, fmt (0, "%"));
+
     // Modulators (random modifiers and friends).
     for (int m = 1; m <= kNumMods; ++m)
     {

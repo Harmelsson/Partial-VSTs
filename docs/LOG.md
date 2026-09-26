@@ -147,3 +147,6 @@ passed on the first run (numbers inspected, they're meaningful).
 **UI fixes after snapshots:** Dice tuning button squeezed; modulator rows wrapped.
 **Known/unknown:** CPU in FL not measured yet (72 osc × 16 voices worst case); FX worst case
 drives the limiter hard (safe, but loud) — levels may want taming after the user listens.
+- v0.3.1 (same session): chaos toys — Chord (size/step; in Scale mode steps are scale degrees),
+  partial Wander (shared random walk per partial), loudness Scramble. `--bench` CPU check added.
+  Timbre tab relaid into two rows (first version overflowed the page). 59/59 checks.

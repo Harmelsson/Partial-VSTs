@@ -2,9 +2,10 @@
 
 _Last updated: 2026-09-26 (session 1)_
 
-## Seed Playground v0.3.0 — built while the user was away
+## Seed Playground v0.3.1 — built while the user was away
 Design, feature list and HOW TO USE: `docs/PLAYGROUND.md`. User's job on return: try it, decide
-what to keep / delete / split into a new synth / change. 55/55 headless checks pass.
+what to keep / delete / split into a new synth / change. 59/59 headless checks pass.
+`SeedTests --bench` measures CPU.
 
 ## What exists
 - **Seed v0.3.0 playground** (`plugins/Seed/`): calculator (dissonance + consonance, hand edits

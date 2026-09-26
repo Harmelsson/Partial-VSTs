@@ -16,7 +16,7 @@ cross-note consonance `R ≈ (m/n)^S`.
 
 | # | Name (working) | What it does | Weird | Risk | Status |
 |---|---|---|---|---|---|
-| I1 | **Seed** | The ArtHar Calculator made playable: additive synth, partials at `n^log2(seed)`, rolloff, drone mode, per-partial mute. Later: keyboard mapped to the calculator's found scale (dissonance-curve dips) instead of 12-EDO. Seed 2.0 must sound like a plain saw-ish tone (built-in ear check). | 🟡 | low | **testing** — v0.1.0 built (no scale mapping yet); v0.2 design in SEED_NOTE_LIFE.md |
+| I1 | **Seed** | The ArtHar Calculator made playable: additive synth, partials at `n^log2(seed)`, rolloff, drone mode, per-partial mute. Later: keyboard mapped to the calculator's found scale (dissonance-curve dips) instead of 12-EDO. Seed 2.0 must sound like a plain saw-ish tone (built-in ear check). | 🟡 | low | **testing** — v0.3.1 playground (see PLAYGROUND.md); user curates what stays |
 | I2 | **Bellmaker** | Arithmetic partial series (`F, M·F, (2M−1)·F…`) — every register sounds different, bell/metallophone-like. | 🟡 | low | idea |
 | I3 | **Chameleon** | Timbre bends to the chord: when you hold several notes, each voice's partials drift toward positions that make them consonant with the *other* held notes (Sethares in real time). Any chord "resolves" by changing timbre, not pitch. | 🔴 | med | idea |
 | I4 | **Magnets** | The opposite: held notes' *pitches* glide toward nearby roughness minima relative to each other — chords settle into place by themselves, like the dancing XP squares. | 🔴 | med | idea |
@@ -28,6 +28,8 @@ cross-note consonance `R ≈ (m/n)^S`.
 
 | # | Name (working) | What it does | Weird | Risk | Status |
 |---|---|---|---|---|---|
+| F7 | **Rough Reverb** | Combs on the scale + twins detuned to max roughness (built into Seed v0.3). Could become its own FX plugin. | 🔴 | low | in Seed |
+| F8 | **Partial Delay** | Delay fed only by picked partials, spiral pitch per repeat (in Seed v0.3). | 🔴 | low | in Seed |
 | F1 | **Stretch Resonator** | Bank of resonators tuned to a stretched partial series; MIDI or knob sets f0. Put it on drums/noise/voice → it rings like a bell that shouldn't exist. | 🟡 | low | idea — strong 2nd candidate |
 | F2 | **Spectral Stretcher** | FFT, remap every frequency `f → f0·(f/f0)^S`. Stretches the harmonic series of *any* sample (vocals!). Artifacts welcome. | 🔴 | high | idea |
 | F3 | **Partial Gate** | FFT; pass only energy that is consonant (or only dissonant) with a reference seed spectrum. | 🔴 | med | idea |

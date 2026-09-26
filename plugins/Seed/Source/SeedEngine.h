@@ -57,6 +57,8 @@ struct EngineParams
     // Sends (0..1) and which partials they pick.
     double sendA = 0.0, sendB = 0.0;
     int ruleA = RuleOdd, ruleB = RuleAll;
+    // Chaos toys (synth-side only: the calculator never sees them).
+    double wanderCents = 0.0, wanderRate = 0.5, scramble = 0.0;
 };
 
 class Engine
@@ -239,6 +241,9 @@ private:
         s.sendA = smooth (s.sendA, t.sendA);
         s.sendB = smooth (s.sendB, t.sendB);
         s.ruleA = t.ruleA; s.ruleB = t.ruleB;
+        s.wanderCents = smooth (s.wanderCents, t.wanderCents);
+        s.wanderRate = t.wanderRate;
+        s.scramble = smooth (s.scramble, t.scramble);
     }
 
     /// Where a key sits (cents from middle C, before pitch shift/bend) and its note strength.
@@ -327,6 +332,16 @@ private:
         const float noiseAmp = s.noiseDb <= -59.9 ? 0.0f : (float) (0.5 * std::pow (10.0, s.noiseDb / 20.0));
         hasSends = s.sendA > 1e-4 || s.sendB > 1e-4 || target.sendA > 0.0 || target.sendB > 0.0;
 
+        // Wander: every partial walks its own bounded random path (shared by all voices).
+        if (s.wanderCents > 1e-3)
+            for (int i = 1; i < kOsc; ++i)
+            {
+                auto& w = wanderState[(size_t) i];
+                const double r = s.wanderRate * (0.5 + hash (i, 11));
+                w += (double) rnd (wanderRng) * std::sqrt (r * tickSec) * 1.2 - w * r * tickSec * 0.6;
+                w = std::clamp (w, -1.0, 1.0);
+            }
+
         // Shared (voice-independent) partial table: the calculator's edited partials.
         std::array<double, kOsc> cents {}, calcAmp {}, sendWA {}, sendWB {}, panL {}, panR {};
         std::array<bool, kOsc> isCustom {};
@@ -353,6 +368,7 @@ private:
                 if (s.oddEven > 0 && ! odd) calcAmp[ii] *= 1.0 - s.oddEven;
                 if (s.oddEven < 0 && odd) calcAmp[ii] *= 1.0 + s.oddEven;
             }
+            if (i > 0) cents[ii] += s.wanderCents * wanderState[ii];
             sendWA[ii] = s.sendA * sendRule (s.ruleA, i, isCustom[ii]);
             sendWB[ii] = s.sendB * sendRule (s.ruleB, i, isCustom[ii]);
             // Stereo spread: each partial gets a fixed random place in the stereo field.
@@ -360,6 +376,19 @@ private:
             const double ang = (pan + 1.0) * 0.25 * 3.141592653589793;
             panL[ii] = std::cos (ang) * 1.41421356;
             panR[ii] = std::sin (ang) * 1.41421356;
+        }
+
+        // Scramble: blend each series partial's loudness with another partial's (fixed shuffle).
+        if (s.scramble > 1e-4)
+        {
+            std::array<double, kSeries> orig {};
+            for (int i = 0; i < kSeries; ++i) orig[(size_t) i] = calcAmp[(size_t) i];
+            const int n = std::max (1, s.partials);
+            for (int i = 1; i < n; ++i)
+            {
+                const int j = 1 + (int) (hash (i, 23) * (n - 1)) % std::max (1, n - 1);
+                calcAmp[(size_t) i] = orig[(size_t) i] + s.scramble * (orig[(size_t) std::min (j, n - 1)] - orig[(size_t) i]);
+            }
         }
 
         for (auto& v : voices)
@@ -537,6 +566,8 @@ private:
     double sr = 48000.0, tickSec = kControlBlock / 48000.0, smoothCoef = 0.98;
     EngineParams target, s;
     std::array<double, kSeries> log2N {};
+    std::array<double, kOsc> wanderState {};
+    uint32_t wanderRng = 777u;
     std::array<Voice, kMaxVoices> voices {};
     std::array<double, kMaxPlayable> playCents {}, playStrength {};
     int numPlayable = 0;

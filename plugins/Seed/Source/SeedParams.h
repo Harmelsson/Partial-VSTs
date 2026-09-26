@@ -15,7 +15,7 @@
 
 namespace seed
 {
-inline constexpr const char* kVersion = "0.3.0";
+inline constexpr const char* kVersion = "0.3.1";
 
 namespace ids
 {
@@ -73,6 +73,12 @@ namespace ids
     inline constexpr const char* rvbDecay = "rvbDecay";
     inline constexpr const char* rough = "rough";
     inline constexpr const char* rvbLevel = "rvbLevel";
+    // v0.3.1 — chaos toys
+    inline constexpr const char* chordSize = "chordSize";
+    inline constexpr const char* chordStep = "chordStep";
+    inline constexpr const char* wander = "wander";
+    inline constexpr const char* wanderRate = "wanderRate";
+    inline constexpr const char* scramble = "scramble";
 
     // Generated per-item IDs.
     inline juce::String partialLevel (int n) { return "p" + juce::String (n) + "lvl"; }   // n = 1..64
@@ -121,7 +127,7 @@ inline const juce::StringArray& modTargetNames()
                                        "Tilt", "Odd/Even", "Spread", "Shimmer", "Formant freq", "Formant gain",
                                        "Noise", "Cutoff", "Resonance", "Filter env", "Send A", "Delay time",
                                        "Delay fb", "Spiral", "Send B", "Rvb decay", "Roughness", "Magnet",
-                                       "Life", "Glide", "Gain" };
+                                       "Life", "Glide", "Gain", "Wander", "Scramble" };
     return a;
 }
 inline const std::vector<const char*>& modTargetIds()
@@ -131,7 +137,7 @@ inline const std::vector<const char*>& modTargetIds()
                                               ids::formFreq, ids::formGain, ids::noise, ids::cutoff, ids::reso,
                                               ids::filterEnv, ids::sendA, ids::delayTime, ids::delayFb, ids::spiral,
                                               ids::sendB, ids::rvbDecay, ids::rough, ids::magnet, ids::life,
-                                              ids::glide, ids::gain };
+                                              ids::glide, ids::gain, ids::wander, ids::scramble };
     return v;
 }
 

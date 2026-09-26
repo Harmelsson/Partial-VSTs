@@ -94,6 +94,7 @@ private:
     std::vector<float> dryL, dryR, busA, busB;
     int droneSounding = -1;
     double bendNorm = 0.0;                          // pitch wheel, -1..1
+    int chordSize = 1, chordStep = 2;
     double sampleRateHz = 48000.0;
 
     // Calculator worker + audio handoff.

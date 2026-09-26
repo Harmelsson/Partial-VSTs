@@ -36,6 +36,8 @@ synth, or change." ~1.5 h of experimentation._
 - [x] E modulators + dice/mutate
 - [x] F presets
 - [x] G tabs UI, snapshot, docs  → **v0.3.0 done: 55/55 headless checks**
+- [x] v0.3.1 chaos toys: chord, wander, scramble (59/59 checks). CPU (Linux): 1 voice ≈1%,
+      16 voices × 64 partials + filter + sends + FX ≈17% of one core.
 
 ## How to use it (for the user)
 - **Calculator (top)**: Fundamental, Seed, Partials, Rolloff, Scale method (Dissonance / Consonance)
@@ -53,4 +55,7 @@ synth, or change." ~1.5 h of experimentation._
   gain) · Envelope · Timbre (tilt, odd/even, spread, shimmer, formant) · Filter & noise ·
   FX (Partial Delay, Rough Reverb) · Modulators (4 × shape/rate/depth/target, live meter).
   *Mutate sound* = small random nudge, *Dice sound* = randomise the whole synth half.
+- **v0.3.1 chaos toys**: *Chord size / step* (Keys tab): one key plays a stack; in Scale mode the
+  step counts SCALE DEGREES (great with Consonance scales). *Wander* (Timbre): every partial
+  drifts on its own random path (± cents, rate). *Scramble* (Timbre): partials swap loudness.
 - Everything above is a host parameter → automatable in FL (≈300 params, names say what they are).

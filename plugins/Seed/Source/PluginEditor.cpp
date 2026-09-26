@@ -244,6 +244,8 @@ void SeedEditor::buildPages()
     box (keys, ids::pitch, "Pitch shift (c)", 4, 1, 100.0, 120);
     box (keys, ids::fshift, "Freq shift (Hz)", 4, 1, 1.0, 120);
     box (keys, ids::bendRange, "Bend range (st)", 2, 0, 1.0);
+    box (keys, ids::chordSize, "Chord size", 1, 0, 1.0, 90);
+    box (keys, ids::chordStep, "Chord step", 2, 0, 1.0, 90);
     seg (keys, ids::drone, "Drone", { "Off", "On" }, 110);
     {
         auto c = std::make_unique<pvst::ScrubBox> (p (ids::droneNote), "Drone note", 3, 0, 1.0);
@@ -265,8 +267,7 @@ void SeedEditor::buildPages()
     box (env, ids::release, "Release (ms)", 5, 0, 10.0, 112);
 
     auto& timbre = pages[2];
-    caption (timbre, "ADDITIVE  (shapes the calculator's partials)", 330);
-    timbre.newLine();
+    caption (timbre, "ADDITIVE", 96);
     box (timbre, ids::tilt, "Tilt (dB/oct)", 2, 1, 0.5);
     box (timbre, ids::oddEven, "Odd/Even (%)", 3, 0, 5.0);
     box (timbre, ids::spread, "Stereo spread (%)", 3, 0, 5.0, 120);
@@ -274,7 +275,13 @@ void SeedEditor::buildPages()
     box (timbre, ids::shimmerRate, "Shimmer (Hz)", 2, 2, 0.1);
     box (timbre, ids::formFreq, "Formant (Hz)", 5, 0, 10.0, 112);
     box (timbre, ids::formGain, "Formant (dB)", 2, 1, 1.0);
+    timbre.newLine();
+    caption (timbre, "", 96);
     box (timbre, ids::formWidth, "Formant (oct)", 1, 2, 0.1);
+    caption (timbre, "CHAOS (synth only)", 150);
+    box (timbre, ids::wander, "Wander (c)", 3, 1, 5.0);
+    box (timbre, ids::wanderRate, "Wander (Hz)", 2, 2, 0.1);
+    box (timbre, ids::scramble, "Scramble (%)", 3, 0, 5.0);
 
     auto& filt = pages[3];
     seg (filt, ids::filterMode, "Filter (per voice, after the partials)", filterModeNames(), 420);

@@ -6,7 +6,7 @@ using namespace seed;
 // Mod target indices (must match modTargetNames()/modTargetIds() order in SeedParams.h).
 enum Tgt { T_None = 0, T_Seed, T_Fund, T_Rolloff, T_MinDip, T_Pitch, T_FShift, T_Tilt, T_OddEven, T_Spread,
            T_Shimmer, T_FormFreq, T_FormGain, T_Noise, T_Cutoff, T_Reso, T_FilterEnv, T_SendA, T_DelayTime,
-           T_DelayFb, T_Spiral, T_SendB, T_RvbDecay, T_Rough, T_Magnet, T_Life, T_Glide, T_Gain, T_Count };
+           T_DelayFb, T_Spiral, T_SendB, T_RvbDecay, T_Rough, T_Magnet, T_Life, T_Glide, T_Gain, T_Wander, T_Scramble, T_Count };
 
 SeedProcessor::SeedProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -122,6 +122,9 @@ void SeedProcessor::buildEngineParams (double blockSeconds)
     ep.keyTrack = V (ids::keyTrack) / 100.0; ep.filterEnvOct = E (T_FilterEnv); ep.filterDecayMs = V (ids::filterDecay);
     ep.sendA = E (T_SendA) / 100.0; ep.ruleA = (int) V (ids::ruleA);
     ep.sendB = E (T_SendB) / 100.0; ep.ruleB = (int) V (ids::ruleB);
+    ep.wanderCents = E (T_Wander); ep.wanderRate = V (ids::wanderRate); ep.scramble = E (T_Scramble) / 100.0;
+    chordSize = juce::jlimit (1, 5, (int) std::lround (V (ids::chordSize)));
+    chordStep = juce::jlimit (1, 12, (int) std::lround (V (ids::chordStep)));
 }
 
 xen::PartialEdits SeedProcessor::partialEditsFromParams() const
@@ -190,8 +193,19 @@ void SeedProcessor::updateScaleOnAudioThread()
 // ================================================================================================
 void SeedProcessor::handleMidi (const juce::MidiMessage& m)
 {
-    if (m.isNoteOn()) engine.noteOn (m.getNoteNumber(), m.getFloatVelocity());
-    else if (m.isNoteOff()) { if (m.getNoteNumber() != droneSounding) engine.noteOff (m.getNoteNumber()); }
+    // Chord: every key also plays (chordSize - 1) more keys, chordStep keys apart. In Scale mode
+    // keys are scale degrees, so this stacks the calculator's own notes.
+    if (m.isNoteOn())
+    {
+        for (int k = 0; k < chordSize; ++k)
+            if (const int key = m.getNoteNumber() + k * chordStep; key <= 127)
+                engine.noteOn (key, m.getFloatVelocity() * (k == 0 ? 1.0f : 0.85f));
+    }
+    else if (m.isNoteOff())
+    {
+        for (int k = 0; k < chordSize; ++k)
+            if (const int key = m.getNoteNumber() + k * chordStep; key <= 127 && key != droneSounding) engine.noteOff (key);
+    }
     else if (m.isAllNotesOff() || m.isAllSoundOff()) { engine.allNotesOff(); droneSounding = -1; }
     else if (m.isPitchWheel()) bendNorm = (m.getPitchWheelValue() - 8192) / 8192.0;
 }

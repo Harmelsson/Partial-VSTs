@@ -750,6 +750,7 @@ void snapshot (const juce::File& file)
             juce::Thread::sleep (5);
         }
     }
+    if (auto* km = std::getenv ("SEED_KEYMODE")) setp (seed::ids::keyMode, (float) juce::String (km).getIntValue());
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
     if (auto* tab = std::getenv ("SEED_TAB")) static_cast<SeedEditor*> (ed.get())->showTab (juce::String (tab).getIntValue());
     juce::MessageManager::getInstance()->runDispatchLoopUntil (900); // calculator + animations settle

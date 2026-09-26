@@ -390,6 +390,38 @@ void SeedEditor::timerCallback()
     const float fade = std::pow (0.5f, dt / 0.18f);
     for (size_t i = 0; i < emphasis.size(); ++i) emphasis[i] = lit[i] ? 1.0f : (emphasis[i] * fade < 0.01f ? 0.0f : emphasis[i] * fade);
     curvePlot.setEmphasis (emphasis);
+
+    // Where the keys land for the chosen key mode (v0.5). Key C4 (60) = the unison, except in
+    // 12-EDO where keys keep their normal pitches (so the unison sits wherever the Fundamental is).
+    {
+        const int keyMode = (int) std::lround (p (ids::keyMode).convertFrom0to1 (p (ids::keyMode).getValue()));
+        const double per = fin.valid ? fin.period : std::abs (xen::periodCents (settings.seed));
+        const double edoOffset = 1200.0 * std::log2 (seed::kC4 / settings.fundamentalHz); // C4 relative to the unison
+        std::array<double, 80> pc {}, pst {};
+        const int np = fin.valid ? fin.playable (pc.data(), pst.data(), 80) : 0;
+        const double magnet = p (ids::magnet).convertFrom0to1 (p (ids::magnet).getValue()) / 100.0;
+        std::vector<pvst::CurvePlot::KeyMarker> km;
+        for (int k = 0; k < 40; ++k)
+        {
+            double c = 0.0;
+            if (keyMode == seed::Keys12) c = edoOffset + k * 100.0;
+            else if (keyMode == seed::KeysSeed12 || np == 0) c = k * per / 12.0;
+            else if (keyMode == seed::KeysScale) c = (k / np) * per + pc[(size_t) (k % np)];
+            else
+            {
+                const double base = k * per / 12.0, oct = std::floor (base / per), within = base - oct * per;
+                double best = 0.0, bestD = 1e18;
+                for (int i = 0; i <= np; ++i)
+                {
+                    const double nc = i < np ? pc[(size_t) i] : per;
+                    if (std::abs (nc - within) < bestD) { bestD = std::abs (nc - within); best = nc; }
+                }
+                c = base + magnet * (best - within);
+            }
+            km.push_back ({ c, juce::MidiMessage::getMidiNoteName (60 + k, true, false, 4) });
+        }
+        curvePlot.setKeyMarkers (std::move (km), keyMode == seed::KeysSeed12 || keyMode == seed::KeysMagnet, edoOffset);
+    }
     scaleTable.setEmphasis (emphasis);
 
     // Only the chosen method's settings are shown (user v0.3.1).

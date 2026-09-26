@@ -80,6 +80,14 @@ public:
     void setScale (const xen::FinalScale& s) { scale = s; }
     /// Optional label drawn above each note (index = FinalScale index), e.g. the key playing it.
     void setNoteLabels (std::vector<juce::String> l) { labels = std::move (l); }
+    /// Where the keyboard's keys land (v0.5, "visualise every scale type"): small labelled
+    /// triangles on the curve's floor. show12Edo adds faint 12-EDO guide lines (every 100 c) so
+    /// the deviation of a stretched keyboard is visible.
+    struct KeyMarker { double cents; juce::String label; };
+    void setKeyMarkers (std::vector<KeyMarker> m, bool show12Edo, double edoOffsetCents)
+    {
+        keyMarkers = std::move (m); showEdo = show12Edo; edoOffset = edoOffsetCents;
+    }
     /// 0..1 per FinalScale note: how "lit" it is because it's being played (ArtHar's emphasis).
     void setEmphasis (std::vector<float> e) { emphasis = std::move (e); }
     void setBusy (bool b) { busy = b; }
@@ -149,6 +157,31 @@ public:
                             ? "seed ~ 1: every partial is on one pitch, there is no \"octave\" to search"
                             : "calculating...", data.toNearestInt(), juce::Justification::centred);
             return;
+        }
+
+        // 12-EDO reference (faint dashed) and where each key lands (triangles on the floor).
+        if (showEdo)
+        {
+            g.setFont (theme::sans (10.5f));
+            for (double c = edoOffset - 100.0 * std::floor (edoOffset / 100.0); c <= frameMax; c += 100.0)
+            {
+                const float x = xOf (c);
+                g.setColour (theme::mix (0.35f));
+                for (float y = data.getY(); y < data.getBottom(); y += 7.0f) g.fillRect (x, y, 1.0f, 3.0f);
+            }
+            g.setColour (theme::mix (0.5f));
+            g.drawText ("dashed = 12-EDO", data.withHeight (14.0f).translated (0.0f, 2.0f).withTrimmedRight (6.0f), juce::Justification::centredRight);
+        }
+        for (auto& k : keyMarkers)
+        {
+            if (k.cents < -1.0 || k.cents > frameMax) continue;
+            const float x = xOf (k.cents), yb = data.getBottom() - 1.0f;
+            juce::Path tri;
+            tri.addTriangle (x - 4.0f, yb, x + 4.0f, yb, x, yb - 7.0f);
+            g.setColour (theme::mix (0.8f));
+            g.fillPath (tri);
+            g.setFont (theme::sans (10.0f));
+            g.drawText (k.label, juce::Rectangle<float> (x - 14.0f, yb - 20.0f, 28.0f, 12.0f), juce::Justification::centred);
         }
 
         // Notes: a clear vertical line, a big hollow square on the curve, and the key label on top
@@ -235,6 +268,9 @@ private:
     xen::CalculatorOutput result;
     xen::FinalScale scale;
     std::vector<juce::String> labels;
+    std::vector<KeyMarker> keyMarkers;
+    bool showEdo = false;
+    double edoOffset = 0.0;
     std::vector<float> emphasis;
     bool lastDownWasLeft = false;
     SquareLattice lattice;

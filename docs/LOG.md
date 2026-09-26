@@ -117,3 +117,13 @@ smoothing now snaps); "·" rendered as "Â·" (JUCE reads const char* as Latin-1
 - Run #6 = Seed v0.2.0, check-in scheduled for 08:01 UTC.
 - 08:01 check-in: run #6 (Seed v0.2.0) green on Windows incl. all 35 tests; Release `build-6`
   published. Handed to user.
+
+## 2026-09-26 — session 1 — user loved v0.2.0, playground brief
+**User:** "Holy shit... amazing work!!!" Minor bugs will be reported later. Brief for the next few
+hours (user away): turn Seed into an experimental playground, chaotic on purpose; wants pitch
+shifting, full automation of anything modifiable, presets (reuse a tuning with another sound),
+ArtHar-style custom/disabled notes, custom partials + loudness, consonance method,
+additive/subtractive tools, random modifiers, marked calculator modifications that fall back to
+the calculator value when removed, synth separate from calculator, creative FX (delay on specific
+partials, uncomfortable reverb). "~1.5 h of experimentation". Design: docs/PLAYGROUND.md.
+Read ArtHar v1.4 (commit 4185c4b) consonance.rs + scale.rs note switching, with user's permission.

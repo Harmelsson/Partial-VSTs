@@ -2,6 +2,11 @@
 
 _Last updated: 2026-09-26 (session 1)_
 
+## IN PROGRESS — Seed Playground (v0.3.x)
+User is away for a few hours; asked for a big experimental "chaotic mess" to curate on return.
+Plan + phase checklist: `docs/PLAYGROUND.md`. Each phase is committed separately; if a session
+ends mid-way, continue at the first unchecked phase there.
+
 ## What exists
 - **Seed v0.2.0** (`plugins/Seed/`, see its README): ArtHar-style redesign; Calculator bar on top
   (Fundamental, Seed, Partials, Rolloff, Min dip strength) with live dissonance curve, partials

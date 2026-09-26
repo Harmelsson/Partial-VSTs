@@ -37,5 +37,5 @@ UI "looks kinda shit" → v0.2 redesign.
 - Tests: `tools/SeedTests.cpp`.
 
 ## Next (see docs/SEED_NOTE_LIFE.md)
-v0.2: the keyboard plays the seed's own *scale* (dissonance-curve dips), and held notes survive
+v0.3: the keyboard plays the seed's own *scale* (dissonance-curve dips), and held notes survive
 the scale changing under them — the note birth/death design.

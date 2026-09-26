@@ -52,3 +52,8 @@ Format: **topic** — what happened → what to do instead. (date)
 ## DSP
 - One-pole smoothing never reaches its target exactly → anything testing `== 0` (sustain 0 ends a
   note) must snap when close. `smoothTowards` in SeedEngine does this now. (2026-09-26)
+- **Release step 403 "Resource not accessible by integration"** (2026-09-26): runs #3 and #4 failed
+  creating their Release; run #5 with the identical workflow succeeded (Release `build-5` exists).
+  Cause unknown (both started within seconds of each other, right after the workflow first got
+  `permissions: contents: write`). If it recurs: check repo Settings → Actions → General →
+  Workflow permissions = "Read and write" (user must click it; agent can't).

@@ -109,3 +109,9 @@ strongest dip (927.93 c). 64 partials: ~90 ms per curve.
 smoothing now snaps); "·" rendered as "Â·" (JUCE reads const char* as Latin-1); scale table clipped.
 **Found, not a bug:** seed 0.5 (undertones) has only shallow dips (fifth ≈1.5%) → with the default
 2% cut-off its scale is empty. Musically real: loud partials in the bass = smooth roughness.
+
+## 2026-09-26 — session 1 — CI check-in results
+- Run #1 green (took ~20 min: first run, no JUCE cache). #2 green. #3/#4 failed only at the Release
+  step (403, see LESSONS). #5 green and published Release `build-5` (Seed v0.1.0).
+  With the JUCE cache warm, configure takes ~30 s and the build ~10 min.
+- Run #6 = Seed v0.2.0, check-in scheduled for 08:01 UTC.

@@ -6,9 +6,8 @@ _Last updated: 2026-09-26 (session 1)_
 Design, feature list and HOW TO USE: `docs/PLAYGROUND.md`. 86/86 headless checks pass
 (`tools/SeedTests.cpp`; `--bench` CPU, `--release` release-shape probe). CPU (Linux): 16 voices ×
 64 partials + FX ≈ 22 % of one core.
-**Download:** the newest Release on the front page (build-11 or later = v0.5.0; the window's
-top-right shows v0.5.0). Last verified: `build-10` = v0.4.0
-https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-10
+**Download: Release `build-14` (v0.5.0, green on Windows incl. all 86 tests):**
+https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-14
 
 ## What exists
 - **Seed playground** (`plugins/Seed/`): calculator (Dissonance / Consonance / Imported .scl; hand

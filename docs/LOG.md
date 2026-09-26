@@ -215,3 +215,4 @@ params sitting after it → test crash (null param). Restored from git. Lesson a
   normalised value of "Consonance" (old FL automation of Scale method would now point elsewhere).
 - Tests: parse, reject garbage, BP import plays exactly (key 61 = degree 1), export round trip
   with a disabled note, .kbm, fit BP → 3.0000, 12-EDO → 2.0000, state restore. 86/86 pass.
+- CI run #14 green on Windows (build + all tests) → Release `build-14` = Seed v0.5.0.

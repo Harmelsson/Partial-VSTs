@@ -37,6 +37,17 @@ cross-note consonance `R ≈ (m/n)^S`.
 | F5 | **Partial Delay** | Spectral delay: each partial band gets its own delay/feedback, set by its partial number or its dissonance score. Chords smear apart in time. | 🔴 | med | idea |
 | F6 | **Dissonance Scope** | Analysis-only: live roughness curve / partial display of whatever is playing. Eye candy + teaching tool. | 🟡 | low | idea |
 
+## Partial-based FX for Seed's rack (v0.5 proposals, not built yet — user to choose)
+| # | Name | What it does | Weird | Status |
+|---|---|---|---|---|
+| R1 | **Partial Chorus** | each picked partial gets its own slow detune wobble (not the whole sound) | 🟡 | idea |
+| R2 | **Partial Gate Sequencer** | BPM-synced steps switch picked partials on/off → rhythm made of timbre | 🔴 | idea |
+| R3 | **Partial Auto-pan** | every partial circles the stereo field at its own rate | 🟡 | idea |
+| R4 | **Spectral Phaser** | a notch sweeps over the partial INDEX (1 → N), not over Hz | 🔴 | idea |
+| R5 | **Beat Maker** | detunes partial pairs so they beat exactly at 1/4, 1/8… of the host tempo | 🔴 | idea |
+| R6 | **Partial Freeze** | hold/sustain chosen partials after the note ends | 🟡 | idea |
+| R7 | **Tuned Distortion** | "distortion" built additively: new partials placed at stretched positions (intermodulation that respects the seed) | 🔴 | idea (user wants to learn distortion types first) |
+
 ## Notes / constraints
 - FL Studio handles MIDI-effect plugins awkwardly → put scale/keyboard mapping *inside* each
   instrument rather than as a separate MIDI-FX plugin.

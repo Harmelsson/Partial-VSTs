@@ -13,11 +13,14 @@
 #include "xen/CalcModel.h"
 #include "xen/Consonance.h"
 #include "xen/Dissonance.h"
+#include "xen/Scala.h"
 #include "xen/Stretch.h"
 
 namespace xen
 {
-enum class Method { Dissonance = 0, Consonance = 1 };
+// Imported (v0.5): the notes come from a loaded Scala file instead of being found; the dissonance
+// curve is still drawn (over the imported period) so you can see how well the timbre fits them.
+enum class Method { Dissonance = 0, Consonance = 1, Imported = 2 };
 
 struct CalculatorSettings
 {
@@ -30,13 +33,14 @@ struct CalculatorSettings
     double toleranceCents = 5.0;    // consonance
     int minShared = 2;              // consonance
     PartialEdits edits;             // hand edits + custom partials (default = none)
+    std::vector<double> imported;   // Imported method: cents, rising, no unison, last = period
 
     bool operator== (const CalculatorSettings& o) const
     {
         auto eq = [] (double a, double b) { return juce::exactlyEqual (a, b); };
         if (! (eq (fundamentalHz, o.fundamentalHz) && eq (seed, o.seed) && partials == o.partials && eq (rolloff, o.rolloff)
                && eq (minStrength, o.minStrength) && method == o.method && eq (toleranceCents, o.toleranceCents)
-               && minShared == o.minShared))
+               && minShared == o.minShared && imported == o.imported))
             return false;
         for (size_t i = 0; i < edits.levelDb.size(); ++i)
             if (! eq (edits.levelDb[i], o.edits.levelDb[i]) || ! eq (edits.posCents[i], o.edits.posCents[i]) || edits.inScale[i] != o.edits.inScale[i]) return false;
@@ -136,6 +140,8 @@ private:
                 cs.minShared = job.minShared;
                 finished = con.compute (positions, periodCents (job.seed), cs, out.curve, out.searchComplete, stop);
             }
+            else if (job.method == Method::Imported)
+                finished = computeImported (dis, job, out.curve, stop);
             else
                 finished = dis.compute (job.makePartials(), periodCents (job.seed), job.minStrength, out.curve, stop);
             out.millis = juce::Time::getMillisecondCounterHiRes() - t0;
@@ -147,6 +153,36 @@ private:
                 ++resultId;
             }
         }
+    }
+
+    /// Imported method: the curve over the imported period (no dips kept), then the imported notes
+    /// with a strength = how deep a dissonance valley each one sits in (1 if there are no partials).
+    template <typename StopFn>
+    static bool computeImported (DissonanceCalculator& dis, const CalculatorSettings& job, CurveResult& out, StopFn&& stop)
+    {
+        out = {};
+        if (job.imported.empty() || job.imported.back() <= 1.0) return true; // nothing loaded: invalid scale
+        const double period = job.imported.back();
+        const auto partials = job.makePartials();
+        if (! dis.compute (partials, period, 2.0 /* > any strength: keep no dips */, out, stop)) return false;
+        out.periodCents = period;
+        out.notes.clear();
+        out.notes.push_back ({ 0.0, importedStrength (dis, partials, 0.0), ScaleNote::Unison });
+        for (size_t i = 0; i + 1 < job.imported.size(); ++i)
+            if (job.imported[i] > 0.5 && job.imported[i] < period - 0.5)
+                out.notes.push_back ({ job.imported[i], importedStrength (dis, partials, job.imported[i]), ScaleNote::Found });
+        out.notes.push_back ({ period, importedStrength (dis, partials, period), ScaleNote::Period });
+        out.valid = true;
+        return true;
+    }
+
+    static double importedStrength (DissonanceCalculator& dis, const std::vector<SinePartial>& partials, double c)
+    {
+        if (partials.empty()) return 1.0;
+        auto D = [&] (double x) { return dis.dissonanceAt (partials, centsToRatio (x)); };
+        const double here = D (c), around = 0.5 * (D (c - 25.0) + D (c + 25.0));
+        const double scale = std::max (std::abs (around) + std::abs (here), 1e-12);
+        return std::clamp (0.1 + 2.0 * (around - here) / scale, 0.05, 1.0); // on a slope/peak = faint
     }
 
     juce::CriticalSection lock;

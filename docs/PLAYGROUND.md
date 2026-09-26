@@ -77,6 +77,31 @@ synth, or change." ~1.5 h of experimentation._
 - **Reset edits** now also clears Scale ticks and removes modulators aimed at calculator values
   (Seed, Fundamental, Rolloff, Min dip) — user: "Reset edits doesn't reset everything".
 
+## v0.5.0 changes (user feedback on build 10)
+- **Release fix**: re-pressing a key while its old note was still releasing stole that voice → the
+  tail was cut instantly. Releasing voices are never re-used now (headless release was already smooth).
+- **Curve shows where the keys sit** in every key mode (triangles under the curve, note names), and
+  in Seed-12 / Magnet also the plain **12-EDO** positions as dashes for comparison.
+- **FX rack** (FX tab): 5 slots, signal flows top → bottom; ▲▼ swap slots, square = on/off.
+  Types: **Partial Delay**, **Rough Reverb** (kept), **Chirp Reverb** (new: a spring tank whose
+  all-pass chain turns every click into a falling "pew"; Chirp 0 = plain tank, 1 = cartoon spring),
+  **Squash Comp** (new: Slope 1 = off, 0.25 = 4:1, 0 = limiter, **below 0 = over-compression**: the
+  louder you hit, the quieter it gets). Per slot: Input (*Chain* = what's above, *Partials* = only
+  the picked partials of the synth), **Picks** as a continuous morph (drag / wheel: Odd→Even 50 %
+  = half each), Mix, **Pan**, **Width**.
+- **Hz or BPM** for every time: modulator rates, delay time, Shimmer and Wander rates each have a
+  Sync switch + note division (host tempo; 120 BPM when the host doesn't say).
+- **Mod depth** shows 3 decimals. New mod targets: FX slot 1/2 mix, picks, delay time/feedback, etc.
+- **Scala import/export** (buttons bottom-right of the Calculator):
+  - *Import .scl* loads any Scala scale → Scale method **Imported**. The notes are exactly the
+    file's; your partials stay yours, the curve shows how rough your timbre is on those notes,
+    and the Scale table's *Strength* = how deep a valley each note sits in. Note edits (on/off,
+    move, custom notes) still work on top. Saved with the project and in presets (Tuning part).
+  - *Export .scl* saves what the keyboard plays now (edits included, disabled notes left out)
+    + a matching `.kbm` (key 60 = unison at the Fundamental) for other synths.
+  - *Fit seed*: searches the seed whose stretched partials put the scale's notes into dissonance
+    valleys (Sethares' "timbre follows tuning"). 12-EDO → 2.000, Bohlen-Pierce → 3.000.
+
 ## Recipes to start from (for curating)
 1. **Consonant chord machine**: Method = Consonance · Key mode = Scale · Chord size 3, step 1 →
    every key plays three notes of a scale in which every pair fuses.
@@ -90,5 +115,9 @@ synth, or change." ~1.5 h of experimentation._
    · Glide 300 ms → held chords slide as the scale itself moves (notes may be born / die).
 7. **Hand-built timbre**: Partials 8 · right-click partials 2 and 4 (mute) · double-click to add
    two custom partials · drag them around while a Drone plays.
+9. **A timbre for a foreign scale**: Import .scl (e.g. Bohlen-Pierce, a gamelan pelog, 17-EDO)
+   → *Fit seed* → play: the partials now line up with that scale's notes.
+10. **Backwards breathing**: FX slot 1 = Squash Comp, Slope −0.5, Threshold −30 dB, Mix 100 % →
+    loud chords duck themselves; release them and the tail swells.
 8. **Save a tuning, swap the sound**: build a scale you like → Save as… → Dice sound a few
    times → set *Load: Tuning* and step through presets: the tuning comes back, the sound stays.

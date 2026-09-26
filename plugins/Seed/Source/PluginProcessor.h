@@ -61,6 +61,21 @@ public:
 
     xen::PartialEdits partialEditsFromParams() const;
 
+    // ---- Scala scales (message thread) -------------------------------------------------------
+    /// Loads .scl text as the "Imported" scale and switches the method to Imported.
+    /// Returns false (and changes nothing) if the text has no usable notes.
+    bool importScl (const juce::String& sclText);
+    /// .scl text of the scale the keyboard plays now (note edits applied, disabled notes left out).
+    juce::String exportScl() const;
+    /// .kbm keyboard map for exportScl(): key 60 = unison at the Fundamental.
+    juce::String exportKbm() const;
+    /// Searches the seed whose stretched partials make the current scale's notes sit in dissonance
+    /// valleys ("which timbre fits this scale?") and sets it. Returns the new seed.
+    double fitSeedToCurrentScale();
+    /// Name + note count of the imported scale ("" if none).
+    juce::String importedScaleName() const { return importedName; }
+    int importedScaleSize() const { return (int) importedCents.size(); }
+
     // ---- Presets (message thread) -----------------------------------------------------------
     enum class Scope { All = 0, Tuning = 1, Sound = 2 };
     static juce::File presetFolder();
@@ -132,6 +147,11 @@ private:
     // Calculator worker + audio handoff.
     xen::CalculatorWorker worker;
     xen::CalculatorOutput calcOut;
+    // Imported Scala scale (message thread). The .scl text itself is kept in apvts.state
+    // ("importedScl") and in presets, so projects remember it.
+    juce::String importedSclText, importedName;
+    std::vector<double> importedCents;
+    void setImportedFromText (const juce::String& sclText);
     uint64_t calcSeen = 0;
     juce::SpinLock scaleLock;
     xen::RawScale sharedRaw, audioRaw;

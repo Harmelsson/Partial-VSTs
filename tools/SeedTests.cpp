@@ -723,6 +723,82 @@ void testPresets()
     file.deleteFile();
 }
 
+/// v0.5 Scala: import / export round trip / fit seed / persistence.
+void testScala()
+{
+    std::cout << "scala" << std::endl;
+    const juce::String ji = "! test.scl\n!\nJust major pentatonic\n 5\n!\n 9/8\n 5/4 comment after the ratio\n 3/2\n 884.359\n 2/1\n";
+    const auto parsed = xen::parseScl (ji.toStdString());
+    // A value with a '.' is cents (Scala rule), without one it is a ratio.
+    check (parsed.valid() && parsed.cents.size() == 5 && std::abs (parsed.cents[0] - 203.91) < 0.01
+               && std::abs (parsed.cents[2] - 701.955) < 0.01 && std::abs (parsed.cents[3] - 884.359) < 1e-9 && std::abs (parsed.period() - 1200.0) < 1e-9,
+           "parse .scl (ratios, comments, cents)", juce::String (parsed.cents.size()) + " notes, first " + juce::String (parsed.cents[0], 2));
+
+    Rig r;
+    check (! r.proc->importScl ("garbage"), "import rejects a file without notes");
+    const juce::String bp = [] {
+        juce::String t = "Bohlen-Pierce 13 ED3\n13\n";
+        for (int i = 1; i <= 13; ++i) t << juce::String (1901.955 * i / 13.0, 6) << "\n";
+        return t;
+    }();
+    check (r.proc->importScl (bp), "import Bohlen-Pierce");
+    r.settleCalculator();
+    auto* mp = r.proc->apvts.getParameter (seed::ids::method);
+    check (std::lround (mp->convertFrom0to1 (mp->getValue())) == 2, "method switches to Imported");
+    auto f = r.proc->finalScale();
+    int found = 0;
+    double worst = 0.0;
+    for (int i = 0; i < f.count; ++i)
+        if (f.notes[(size_t) i].kind == xen::ScaleNote::Found)
+        {
+            ++found;
+            worst = std::max (worst, std::abs (f.notes[(size_t) i].cents - 1901.955 * found / 13.0));
+        }
+    check (found == 12 && std::abs (f.period - 1901.955) < 1e-6 && worst < 1e-6, "imported notes are played exactly",
+           juce::String (found) + " notes, period " + juce::String (f.period, 3) + ", worst " + juce::String (worst, 9));
+
+    // The keyboard plays them: Scale key mode, key 61 = degree 1 = 146.30 c above the Fundamental.
+    r.set (seed::ids::keyMode, 2.0f);
+    r.set (seed::ids::partials, 1.0f);
+    r.settleCalculator();
+    auto x = r.render (0.6, Rig::noteOn ({ 61 }));
+    std::vector<float> tail (x.end() - 16384, x.end());
+    const double want = 261.6255653 * std::exp2 (1901.955 / 13.0 / 1200.0);
+    check (toneAmp (tail, want) > 5.0 * toneAmp (tail, 261.6255653 * std::exp2 (100.0 / 1200.0)), "key 61 plays BP degree 1",
+           juce::String (want, 2) + " Hz");
+    r.set (seed::ids::partials, 16.0f);
+    r.render (0.2, Rig::noteOff (61));
+
+    // Export round trip (a disabled note is left out of the file).
+    r.set (seed::ids::noteOn (3), 0.0f);
+    r.settleCalculator();
+    const auto back = xen::parseScl (r.proc->exportScl().toStdString());
+    check (back.valid() && back.cents.size() == 12 && std::abs (back.period() - 1901.955) < 1e-4
+               && std::abs (back.cents[2] - 1901.955 * 4 / 13.0) < 1e-4,
+           "export .scl round trip (disabled degree 3 left out)", juce::String (back.cents.size()) + " pitches");
+    check (r.proc->exportKbm().contains ("\n12\n"), "export .kbm (12 degrees per period)");
+    r.set (seed::ids::noteOn (3), 1.0f);
+
+    // Fit: BP wants seed 3 (the tritave), 12-EDO wants seed 2.
+    const double s3 = r.proc->fitSeedToCurrentScale();
+    check (std::abs (s3 - 3.0) < 0.02, "fit seed to Bohlen-Pierce = 3", juce::String (s3, 4));
+    juce::String edo = "12-EDO\n12\n";
+    for (int i = 1; i <= 12; ++i) edo << juce::String (100.0 * i, 1) << "\n";
+    r.proc->importScl (edo);
+    r.settleCalculator();
+    const double s2 = r.proc->fitSeedToCurrentScale();
+    check (std::abs (s2 - 2.0) < 0.02, "fit seed to 12-EDO = 2", juce::String (s2, 4));
+
+    // Persistence: the project remembers the imported scale.
+    juce::MemoryBlock state;
+    r.proc->getStateInformation (state);
+    Rig q;
+    q.proc->setStateInformation (state.getData(), (int) state.getSize());
+    q.settleCalculator();
+    check (q.proc->importedScaleName() == "12-EDO" && q.proc->finalScale().count == 13, "imported scale restored with the project",
+           q.proc->importedScaleName() + ", " + juce::String (q.proc->finalScale().count) + " notes incl. period");
+}
+
 void snapshot (const juce::File& file)
 {
     SeedProcessor proc;
@@ -828,6 +904,7 @@ int main (int argc, char** argv)
     testChaosToys();
     testV04();
     testV05();
+    testScala();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")
             snapshot (juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]));

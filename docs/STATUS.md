@@ -2,44 +2,39 @@
 
 _Last updated: 2026-09-26 (session 1)_
 
-## Seed v0.4.0 — playground + first round of user feedback (see PLAYGROUND.md "v0.4.0 changes")
-Design, feature list and HOW TO USE: `docs/PLAYGROUND.md`. User's job on return: try it, decide
-what to keep / delete / split into a new synth / change. 66/66 headless checks pass.
-`SeedTests --bench` measures CPU.
-**Download: Release `build-10` (v0.4.0, green on Windows incl. all 66 tests):**
+## Seed v0.5.0 — FX rack, BPM sync, release fix, Scala import/export/fit (PLAYGROUND.md "v0.5.0 changes")
+Design, feature list and HOW TO USE: `docs/PLAYGROUND.md`. 86/86 headless checks pass
+(`tools/SeedTests.cpp`; `--bench` CPU, `--release` release-shape probe). CPU (Linux): 16 voices ×
+64 partials + FX ≈ 22 % of one core.
+**Download:** the newest Release on the front page (build-11 or later = v0.5.0; the window's
+top-right shows v0.5.0). Last verified: `build-10` = v0.4.0
 https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-10
 
 ## What exists
-- **Seed v0.3.0 playground** (`plugins/Seed/`): calculator (dissonance + consonance, hand edits
-  of partials/notes, custom partials/notes) strictly separate from the synth (key modes 12-EDO /
-  Seed-12 / Scale / Magnet, life, glide, pitch + freq shift, additive + subtractive tools, Partial
-  Delay, Rough Reverb, 4 modulators, Dice/Mutate, presets with All/Tuning/Sound scope).
-  ~300 automatable params. 55 headless checks (`tools/SeedTests.cpp`).
-- **Shared kit for all future synths** (`shared/`): `xen/` Stretch, Dissonance (copy of ArtHar's
-  method), CalculatorWorker (background thread); `ui/` Theme (ArtHar two-colour), Controls
-  (per-digit ScrubBox, SegmentedToggle), SquareLattice (square-dot plots + afterglow),
-  CalculatorViews (curve / partials / scale table), EnvelopeView; `dsp/` SafetyStage.
+- **Seed playground** (`plugins/Seed/`): calculator (Dissonance / Consonance / Imported .scl; hand
+  edits of partials/notes, custom partials/notes, Scale ticks) strictly separate from the synth
+  (key modes 12-EDO / Seed-12 / Scale / Magnet, life, glide, chords, pitch + freq shift, additive +
+  subtractive, 5-slot FX rack, 4 modulators with Hz/BPM, Dice/Mutate/Reset per page, presets with
+  All/Tuning/Sound scope). Every setting is a host parameter (automatable).
+- **Shared kit** (`shared/`): `xen/` Stretch, Dissonance, Consonance, CalcModel, CalculatorWorker,
+  Scala (.scl/.kbm + fit seed); `ui/` Theme, Controls, SquareLattice, CalculatorViews,
+  EnvelopeView; `dsp/` SafetyStage, Modulator, PartialDelay, RoughReverb, ChirpReverb + Squash.
 - Pipeline: GitHub Actions builds Windows VST3 + standalone on every non-docs push, runs tests,
-  publishes a GitHub **Release** `Build N` (front page → Releases). Run #2 = first green build;
-  Release `build-5` = v0.1.0; **Release `build-6` = Seed v0.2.0** (green, 08:00 UTC):
-  https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-6
+  publishes a GitHub **Release** `Build N`.
 
-## User should test (Seed v0.3.0) — see docs/PLAYGROUND.md "How to use it"
-Older v0.2 checklist below still applies.
-## (v0.2.0 checklist)
-1. Look & feel vs ArtHar. Scrub digits of Seed while a note is held: curve, table, partials and
-   the sound should all move together.
-2. Velocity: soft vs hard notes. Envelope: drag the three hollow corners; try Sustain 0 (plucks).
-3. Fundamental changes the curve (roughness depends on Hz); with Keys = Seed it also moves key 60.
-4. Min dip strength: more/fewer notes in the table. Partials 64: curve still responsive?
-5. Scrub sensitivity: 18 px per step — too slow/fast?
+## User should test (v0.5.0)
+1. **Release**: does the tail still cut off? (Likely cause was re-pressing a key during its own
+   release — fixed.) If yes: which key mode, release time, and was a key re-pressed?
+2. **Curve key markers**: triangles = where your keys sit; Seed-12 shows 12-EDO dashes too.
+3. **FX rack**: swap order (▲▼), Input Chain vs Partials, Picks morph (drag/wheel), Pan, Width.
+   Chirp Reverb (Chirp knob), Squash Comp with Slope below 0 (over-compression).
+4. **Sync**: set a modulator / the delay / Shimmer / Wander to BPM; change FL's tempo.
+5. **Scala**: Import a .scl (e.g. from the Scala archive), play it, press *Fit seed*, listen to
+   whether it gets smoother. Export .scl and load it into another synth.
 
-## Next
-- **Seed v0.2**: user wants to TRY SEVERAL of the ideas in `docs/SEED_NOTE_LIFE.md` ("variety,
-  no harm"). Plan: a "note life" mode selector, starting with Magnet keyboard + Life knob, then
-  Valley riders / Mitosis / Orphans / Degree keyboard as extra modes. Needs C++ copy of the
-  dissonance curve first.
-- Possibly: per-digit scrubbing for the seed value (ArtHar-style) if the knob is too coarse.
+## Next (user chooses)
+- Partial-based FX from IDEAS.md (R1–R7), a distortion primer + tuned distortion.
+- More synths using the shared calculator (plucks, drums, bells…) once Seed is curated.
 
 ## Open questions for the user
 - Merge policy: each session runs on its own `claude/*` branch. Merge to `main` after each session,

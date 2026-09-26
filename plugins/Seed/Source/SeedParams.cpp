@@ -39,7 +39,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterFloat> (L, ParameterID { ids::seed, v1 }, "Seed", NormalisableRange<float> (0.5f, 4.0f, 0.0f), 2.0f, fmt (6, ""));
     add<AudioParameterInt> (L, ParameterID { ids::partials, v1 }, "Partials", 1, xen::kSeriesPartials, 16);
     add<AudioParameterFloat> (L, ParameterID { ids::rolloff, v1 }, "Rolloff", NormalisableRange<float> (0.0f, 3.0f, 0.0f), 1.0f, fmt (2, ""));
-    add<AudioParameterChoice> (L, ParameterID { ids::method, v3 }, "Scale method", StringArray { "Dissonance", "Consonance" }, 0);
+    add<AudioParameterChoice> (L, ParameterID { ids::method, v3 }, "Scale method", StringArray { "Dissonance", "Consonance", "Imported" }, 0);
     add<AudioParameterFloat> (L, ParameterID { ids::minDip, v2 }, "Min dip strength", NormalisableRange<float> (0.0f, 50.0f, 0.0f), 2.0f, fmt (1, "%"));
     add<AudioParameterFloat> (L, ParameterID { ids::tolerance, v3 }, "Consonance tolerance", NormalisableRange<float> (0.5f, 30.0f, 0.0f), 5.0f, fmt (1, "c"));
     add<AudioParameterInt> (L, ParameterID { ids::minShared, v3 }, "Min shared partials", 1, 8, 2);

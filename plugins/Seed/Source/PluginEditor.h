@@ -91,6 +91,12 @@ private:
     pvst::ScrubBox fundamentalBox, seedBox, partialsBox, rolloffBox, minDipBox, toleranceBox, minSharedBox;
     pvst::SegmentedChoice methodSeg;
     pvst::FlatButton resetEdits { "Reset edits" }, diceTuning { "Dice tuning" };
+    // Scala (v0.5): import a scale / export what the keyboard plays / fit the seed to the scale.
+    pvst::FlatButton importScl { "Import .scl" }, exportScl { "Export .scl" }, fitSeed { "Fit seed" };
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::String scalaMessage; // shown in the info line for a few seconds after an action
+    double scalaMessageUntil = 0.0;
+    void showScalaMessage (const juce::String& m);
     pvst::CurvePlot curvePlot;
     pvst::PartialsPlot partialsPlot;
     pvst::ScaleTable scaleTable;

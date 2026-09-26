@@ -311,7 +311,9 @@ xen::CalculatorSettings SeedProcessor::currentCalculatorSettings() const
     c.rolloff = effRolloff.load() >= 0.0f ? effRolloff.load() : V (ids::rolloff);
     c.minStrength = (effMinDip.load() >= 0.0f ? effMinDip.load() : V (ids::minDip)) / 100.0;
     c.partials = (int) std::lround (V (ids::partials));
-    c.method = (int) V (ids::method) == 1 ? xen::Method::Consonance : xen::Method::Dissonance;
+    const int m = (int) std::lround (V (ids::method));
+    c.method = m == 1 ? xen::Method::Consonance : m == 2 ? xen::Method::Imported : xen::Method::Dissonance;
+    c.imported = importedCents;
     c.toleranceCents = V (ids::tolerance);
     c.minShared = (int) std::lround (V (ids::minShared));
     c.edits = partialEditsFromParams();
@@ -339,6 +341,96 @@ xen::FinalScale SeedProcessor::finalScale() const
 }
 
 // ================================================================================================
+// Scala scales (message thread)
+// ================================================================================================
+/// The enabled notes between the unison and the period, rising (what a .scl file lists).
+static std::vector<double> scaleNotesAboveUnison (const xen::FinalScale& f)
+{
+    std::vector<double> v;
+    for (int i = 0; i < f.count; ++i)
+    {
+        const auto& n = f.notes[(size_t) i];
+        if (n.enabled && n.kind != xen::ScaleNote::Unison && n.kind != xen::ScaleNote::Period) v.push_back (n.cents);
+    }
+    std::sort (v.begin(), v.end());
+    return v;
+}
+
+void SeedProcessor::setImportedFromText (const juce::String& sclText)
+{
+    const auto s = xen::parseScl (sclText.toStdString());
+    importedSclText = s.valid() ? sclText : juce::String();
+    importedName = s.valid() ? juce::String (s.description).trim() : juce::String();
+    if (s.valid() && importedName.isEmpty()) importedName = "Imported";
+    importedCents = s.valid() ? s.cents : std::vector<double> {};
+    // Scala allows unsorted pitches; our scale needs them rising with the period last.
+    if (! importedCents.empty())
+    {
+        const double period = importedCents.back();
+        importedCents.pop_back();
+        importedCents.erase (std::remove_if (importedCents.begin(), importedCents.end(),
+                                             [period] (double c) { return c <= 0.5 || c >= period - 0.5; }),
+                             importedCents.end());
+        std::sort (importedCents.begin(), importedCents.end());
+        importedCents.push_back (period);
+    }
+    apvts.state.setProperty ("importedScl", importedSclText, nullptr);
+}
+
+bool SeedProcessor::importScl (const juce::String& sclText)
+{
+    if (! xen::parseScl (sclText.toStdString()).valid()) return false;
+    setImportedFromText (sclText);
+    auto* m = P (ids::method);
+    m->setValueNotifyingHost (m->convertTo0to1 (2.0f));
+    return true;
+}
+
+juce::String SeedProcessor::exportScl() const
+{
+    const auto f = finalScale();
+    std::vector<double> notes;
+    for (auto& n : scaleNotesAboveUnison (f)) notes.push_back (n);
+    std::sort (notes.begin(), notes.end());
+    auto V = [this] (const char* id) { auto* p = P (id); return (double) p->convertFrom0to1 (p->getValue()); };
+    const auto cs = currentCalculatorSettings();
+    const auto methodName = juce::StringArray { "Dissonance", "Consonance", "Imported" }[(int) cs.method];
+    juce::String desc = "Seed " + juce::String (cs.seed, 4) + " (" + methodName + ")";
+    if (cs.method == xen::Method::Imported && importedName.isNotEmpty()) desc = importedName + " (edited in Seed)";
+    std::vector<std::string> comments {
+        ("Seed " + juce::String (kVersion) + ": seed " + juce::String (cs.seed, 6) + ", partials " + juce::String (cs.partials)
+         + ", fundamental " + juce::String (V (ids::fundamental), 3) + " Hz").toStdString()
+    };
+    return xen::writeScl (desc.toStdString(), comments, notes, f.valid ? f.period : 1200.0);
+}
+
+juce::String SeedProcessor::exportKbm() const
+{
+    const auto f = finalScale();
+    int size = 1; // the unison
+    size += (int) scaleNotesAboveUnison (f).size();
+    auto* fp = P (ids::fundamental);
+    return xen::writeKbm (size, fp->convertFrom0to1 (fp->getValue()));
+}
+
+double SeedProcessor::fitSeedToCurrentScale()
+{
+    const auto f = finalScale();
+    if (! f.valid) return currentCalculatorSettings().seed;
+    std::vector<double> notes;
+    for (auto& n : scaleNotesAboveUnison (f)) notes.push_back (n);
+    notes.push_back (f.period);
+    const auto cs = currentCalculatorSettings();
+    auto* sp = P (ids::seed);
+    const auto range = sp->getNormalisableRange();
+    // Search the seed range the knob allows, but keep away from 1 (no period) and silly highs.
+    const double lo = std::max ((double) range.start, 1.2), hi = std::min ((double) range.end, 4.5);
+    const double best = xen::fitSeedToScale (notes, f.period, cs.fundamentalHz, std::min (cs.partials, 24), cs.rolloff, lo, hi);
+    sp->setValueNotifyingHost (sp->convertTo0to1 ((float) best));
+    return best;
+}
+
+// ================================================================================================
 // Presets + chaos (message thread)
 // ================================================================================================
 juce::File SeedProcessor::presetFolder()
@@ -360,6 +452,7 @@ bool SeedProcessor::savePreset (const juce::String& name)
     presetFolder().createDirectory();
     juce::XmlElement root ("SeedPreset");
     root.setAttribute ("version", kVersion);
+    if (importedSclText.isNotEmpty()) root.setAttribute ("importedScl", importedSclText); // part of the Tuning
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
         {
@@ -390,6 +483,7 @@ bool SeedProcessor::loadPreset (const juce::File& file, Scope scope)
             const float norm = it != values.end() ? rp->convertTo0to1 ((float) it->second) : rp->getDefaultValue();
             rp->setValueNotifyingHost (norm);
         }
+    if (scope != Scope::Sound) setImportedFromText (xml->getStringAttribute ("importedScl"));
     currentPresetName = file.getFileNameWithoutExtension();
     return true;
 }
@@ -405,6 +499,8 @@ void SeedProcessor::randomizeOne (juce::RangedAudioParameter& rp, double amount,
     if (id.endsWith ("dFb")) next = std::min (next, rp.convertTo0to1 (85.0f));
     if (id.endsWith ("mix") && id.startsWith ("fx")) next = std::min (next, rp.convertTo0to1 (70.0f)); // keep dry audible
     if (id == ids::partials) next = std::max (next, rp.convertTo0to1 (4.0f));
+    // Dice may land on "Imported" only when a scale was imported (else there'd be no notes).
+    if (id == ids::method && importedCents.empty()) next = std::min (next, rp.convertTo0to1 (1.0f));
     rp.setValueNotifyingHost (next);
 }
 
@@ -604,6 +700,7 @@ void SeedProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             currentPresetName = apvts.state.getProperty ("presetName").toString();
+            setImportedFromText (apvts.state.getProperty ("importedScl").toString());
         }
 }
 

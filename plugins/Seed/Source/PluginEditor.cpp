@@ -13,13 +13,48 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
       minDipBox (p (ids::minDip), "Min dip (%)", 2, 1, 1.0),
       toleranceBox (p (ids::tolerance), "Tolerance (c)", 2, 1, 0.5),
       minSharedBox (p (ids::minShared), "Min shared", 1, 0, 1.0),
-      methodSeg (p (ids::method), "Scale method", { "Dissonance", "Consonance" })
+      methodSeg (p (ids::method), "Scale method", { "Dissonance", "Consonance", "Imported" })
 {
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &prevPreset, &presetName, &nextPreset, &savePreset, &scopeBtn, &fundamentalBox, &seedBox, &partialsBox,
              &rolloffBox, &methodSeg, &minDipBox, &toleranceBox, &minSharedBox, &resetEdits, &diceTuning, &curvePlot,
-             &partialsPlot, &scaleTable, &partialsTable, &dicePage, &mutatePage, &resetPage, &initAll })
+             &partialsPlot, &scaleTable, &partialsTable, &dicePage, &mutatePage, &resetPage, &initAll, &importScl,
+             &exportScl, &fitSeed })
         addAndMakeVisible (c);
+
+    // ---- Scala ---------------------------------------------------------------------------------
+    // Import = load a .scl as the scale (method -> Imported; the partials stay yours, the curve shows
+    // how rough the timbre is on those notes). Export = the scale the keyboard plays now (edits
+    // included) as .scl + a .kbm (key 60 = unison at the Fundamental). Fit seed = search the seed whose
+    // stretched partials put the scale's notes in dissonance valleys (Sethares: fit timbre to tuning).
+    importScl.onClick = [this] {
+        chooser = std::make_unique<juce::FileChooser> ("Import a Scala scale", juce::File(), "*.scl");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                              [this] (const juce::FileChooser& fc) {
+                                  const auto f = fc.getResult();
+                                  if (! f.existsAsFile()) return;
+                                  if (proc.importScl (f.loadFileAsString()))
+                                      showScalaMessage ("Imported " + proc.importedScaleName() + " (" + juce::String (proc.importedScaleSize()) + " notes)");
+                                  else
+                                      showScalaMessage ("Could not read " + f.getFileName());
+                              });
+    };
+    exportScl.onClick = [this] {
+        chooser = std::make_unique<juce::FileChooser> ("Export the scale as Scala", juce::File(), "*.scl");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [this] (const juce::FileChooser& fc) {
+                                  auto f = fc.getResult();
+                                  if (f == juce::File()) return;
+                                  f = f.withFileExtension ("scl");
+                                  const bool ok = f.replaceWithText (proc.exportScl())
+                                               && f.withFileExtension ("kbm").replaceWithText (proc.exportKbm());
+                                  showScalaMessage (ok ? "Saved " + f.getFileName() + " + .kbm" : "Could not save " + f.getFileName());
+                              });
+    };
+    fitSeed.onClick = [this] {
+        const double s = proc.fitSeedToCurrentScale();
+        showScalaMessage ("Fitted seed " + juce::String (s, 4) + " to the scale");
+    };
     addChildComponent (presetNameEditor);
     presetNameEditor.setFont (th::sans (14.0f));
     presetNameEditor.setColour (juce::TextEditor::backgroundColourId, th::mix (0.08f));
@@ -437,7 +472,14 @@ void SeedEditor::timerCallback()
     const auto newInfo = "Stretch factor " + juce::String (xen::stretchFactor (settings.seed), 6)
                        + th::dot() + "\"octave\" " + juce::String (xen::periodCents (settings.seed), 4) + " cents"
                        + th::dot() + juce::String (found) + " notes found" + th::dot() + "voices " + juce::String (proc.uiActiveVoices.load());
-    if (newInfo != info) { info = newInfo; repaint (calcArea); }
+    auto newInfoText = newInfo;
+    if (settings.method == xen::Method::Imported)
+        newInfoText = (proc.importedScaleName().isEmpty() ? juce::String ("Imported: nothing loaded, use Import .scl")
+                                                          : "Imported: " + proc.importedScaleName())
+                    + th::dot() + "period " + juce::String (fin.period, 2) + " c" + th::dot() + "Stretch factor "
+                    + juce::String (xen::stretchFactor (settings.seed), 4);
+    if (now < scalaMessageUntil) newInfoText = scalaMessage;
+    if (newInfoText != info) { info = newInfoText; repaint (calcArea); }
 }
 
 void SeedEditor::paint (juce::Graphics& g)
@@ -507,8 +549,8 @@ void SeedEditor::resized()
 
 void SeedEditor::layoutCalculatorRow()
 {
-    const bool consonance = shownMethod == 1;
-    minDipBox.setVisible (! consonance);
+    const bool consonance = shownMethod == 1, imported = shownMethod == 2;
+    minDipBox.setVisible (! consonance && ! imported); // Imported: notes come from the file, no settings
     toleranceBox.setVisible (consonance);
     minSharedBox.setVisible (consonance);
     auto row = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
@@ -517,12 +559,25 @@ void SeedEditor::layoutCalculatorRow()
     place (seedBox, 134);
     place (partialsBox, 66);
     place (rolloffBox, 78);
-    place (methodSeg, 200);
+    place (methodSeg, 270);
     if (consonance) { place (toleranceBox, 98); place (minSharedBox, 80); }
-    else place (minDipBox, 90);
+    else if (! imported) place (minDipBox, 90);
     auto buttons = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
     buttons = buttons.removeFromRight (200).withHeight (28).withY (buttons.getY() + 19);
     diceTuning.setBounds (buttons.removeFromRight (96));
     buttons.removeFromRight (8);
     resetEdits.setBounds (buttons.removeFromRight (96));
+    // Scala buttons: small, bottom-right, on the info line.
+    auto sc = calcArea.reduced (10, 5).removeFromBottom (20).removeFromRight (300);
+    fitSeed.setBounds (sc.removeFromRight (96));
+    sc.removeFromRight (6);
+    exportScl.setBounds (sc.removeFromRight (96));
+    sc.removeFromRight (6);
+    importScl.setBounds (sc.removeFromRight (96));
+}
+
+void SeedEditor::showScalaMessage (const juce::String& m)
+{
+    scalaMessage = m;
+    scalaMessageUntil = juce::Time::getMillisecondCounterHiRes() + 4000.0;
 }

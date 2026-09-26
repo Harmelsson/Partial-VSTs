@@ -205,3 +205,13 @@ params sitting after it → test crash (null param). Restored from git. Lesson a
 - Fit measure attempts: (1) note roughness vs timbre average → 12-EDO fitted seed 3.5 (wrong, FAILED);
   (2) valley depth at ±15/±35 c → 12-EDO 2.96 (still wrong, FAILED); (3) valley depth with the PERIOD
   weighted ×4 → 12-EDO 2.0000, Bohlen-Pierce 13 → 3.0000, JI major → 2.0000 (works). ~80 ms per fit.
+
+## Seed v0.5.0 — Scala integration (Imported method, Import/Export/Fit buttons)
+- Method "Imported" (3rd choice of Scale method): the worker draws the curve over the imported
+  period and uses the file's notes; strength = valley depth (±25 c) of each note. Note edits apply.
+- Import/Export via async FileChooser (export also writes .kbm). Fit seed searches 1.2–4.5 with up
+  to 24 partials. The .scl text lives in apvts.state ("importedScl") and in presets (Tuning scope).
+- Dice can pick "Imported" only when a scale was imported. Adding the 3rd choice shifts the
+  normalised value of "Consonance" (old FL automation of Scale method would now point elsewhere).
+- Tests: parse, reject garbage, BP import plays exactly (key 61 = degree 1), export round trip
+  with a disabled note, .kbm, fit BP → 3.0000, 12-EDO → 2.0000, state restore. 86/86 pass.

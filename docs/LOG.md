@@ -127,3 +127,23 @@ additive/subtractive tools, random modifiers, marked calculator modifications th
 the calculator value when removed, synth separate from calculator, creative FX (delay on specific
 partials, uncomfortable reverb). "~1.5 h of experimentation". Design: docs/PLAYGROUND.md.
 Read ArtHar v1.4 (commit 4185c4b) consonance.rs + scale.rs note switching, with user's permission.
+
+## 2026-09-26 — session 1 — Seed v0.3.0 playground built (user away)
+**Done (see docs/PLAYGROUND.md):** consonance copy (ArtHar v1.4) · CalcModel (partial/note edits as
+offsets with neutral values, custom slots) · calculator worker moved into the processor (message-
+thread pump, try-lock handoff to audio) · ~300 params in SeedParams (TUNING vs SOUND groups) ·
+engine rewrite (72 oscillators/voice, stereo spread, 4 key modes, glide, life, pitch + freq
+shift incl. through-zero, tilt/odd-even/formant/shimmer, noise, per-voice SVF + filter env, two
+partial-selective sends) · PartialDelay (ping-pong, spiral pitch per repeat) · RoughReverb (combs
+on the scale + twins detuned to max Plomp-Levelt roughness, twins on the other ear) · 4 modulators
+(sine/tri/saw/square/S&H/smooth/drift) · Dice/Mutate · presets (All/Tuning/Sound) · editable plots
++ scale table with orange "modified" markers · tabbed synth UI (1200×820).
+**Verified:** 55/55 checks incl. consonance = ArtHar's 4:5:6:7 (seed 2) and stretched version
+(2.5); edits mark + reset; muted/shifted/custom partials in the spectrum; Scale & Magnet keys;
+pitch/freq shift; worst-case FX + 12× Dice stay finite and under the ceiling; mod moves the
+calculator's seed; preset scopes.
+**Worked first try:** the whole plugin compiled without errors after the rewrite; all new tests
+passed on the first run (numbers inspected, they're meaningful).
+**UI fixes after snapshots:** Dice tuning button squeezed; modulator rows wrapped.
+**Known/unknown:** CPU in FL not measured yet (72 osc × 16 voices worst case); FX worst case
+drives the limiter hard (safe, but loud) — levels may want taming after the user listens.

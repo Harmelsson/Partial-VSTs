@@ -28,11 +28,29 @@ synth, or change." ~1.5 h of experimentation._
 - **Magnet**: Seed-12 keys pulled toward the nearest playable note by **Magnet** % (idea 5).
 
 ## Progress (update as phases land)
-- [x] A core (compiles; tests being updated): consonance copy, edited partials/notes model, processor-owned calculator worker,
+- [x] A core: consonance copy, edited partials/notes model, processor-owned calculator worker,
       key modes, glide, life, pitch/freq shift
-- [x] B plot editing (written, needs snapshot check): drag/add/remove partials + notes, scale table toggles, orange markers
+- [x] B plot editing: drag/add/remove partials + notes, scale table toggles, orange markers
 - [x] C timbre: additive tools, stereo spread, noise, filter
 - [x] D FX: partial delay, rough reverb
 - [x] E modulators + dice/mutate
 - [x] F presets
-- [ ] G tabs UI (written) +, snapshot, docs
+- [x] G tabs UI, snapshot, docs  → **v0.3.0 done: 55/55 headless checks**
+
+## How to use it (for the user)
+- **Calculator (top)**: Fundamental, Seed, Partials, Rolloff, Scale method (Dissonance / Consonance)
+  + Min dip (dissonance) / Tolerance + Min shared (consonance). *Reset edits* clears every hand edit.
+  *Dice tuning* randomises the calculator.
+- **Curve**: drag a note sideways = move it · double-click empty space = add a custom note (8 slots)
+  · right-click = switch a note off/on · middle-click = back home. Orange = modified.
+- **Partials**: drag up/down = loudness, sideways = move (axis locks after a few px) · double-click
+  = add a custom partial (8 slots) · right-click = mute/unmute · middle-click = remove the edit.
+- **Scale table**: click the square = on/off; middle-click = reset.
+- **Presets (header)**: Save as… (type name, Enter). `<` `>` step, click the name for the list.
+  *Load: All / Tuning / Sound* decides what a preset load replaces → "same tuning, other sound".
+  Files: Documents/Partial-VSTs/Seed Presets/*.seedpreset.
+- **Synth tabs**: Keys & pitch (key modes, magnet, life, glide, pitch/freq shift, bend, drone,
+  gain) · Envelope · Timbre (tilt, odd/even, spread, shimmer, formant) · Filter & noise ·
+  FX (Partial Delay, Rough Reverb) · Modulators (4 × shape/rate/depth/target, live meter).
+  *Mutate sound* = small random nudge, *Dice sound* = randomise the whole synth half.
+- Everything above is a host parameter → automatable in FL (≈300 params, names say what they are).

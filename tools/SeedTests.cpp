@@ -57,10 +57,32 @@ struct Rig
 
     Rig() { proc->setPlayConfigDetails (0, 2, kSr, kBlock); proc->prepareToPlay (kSr, kBlock); }
 
-    void set (const char* id, float value)
+    void set (const juce::String& id, float value)
     {
         auto* p = proc->apvts.getParameter (id);
+        jassert (p != nullptr);
         p->setValueNotifyingHost (p->convertTo0to1 (value));
+    }
+
+    /// Lets the calculator (background thread) catch up with the current settings, and hands its
+    /// scale to the audio thread. Renders a few silent-ish blocks so modulated values are published.
+    void settleCalculator()
+    {
+        juce::AudioBuffer<float> tmp (2, kBlock);
+        juce::MidiBuffer none;
+        for (int i = 0; i < 400; ++i)
+        {
+            tmp.clear();
+            proc->processBlock (tmp, none);
+            proc->pumpCalculator();
+            if (proc->hasCalculatorResult() && ! proc->calculatorBusy() && i > 3)
+            {
+                const auto want = proc->currentCalculatorSettings();
+                if (proc->calculatorOutput().settings == want) break;
+            }
+            juce::Thread::sleep (5);
+        }
+        proc->pumpCalculator();
     }
 
     /// Renders `seconds` of audio (left channel), sending `midi` at the start of the first block.
@@ -189,7 +211,7 @@ void testDynamic()
            "partial count 16 -> 64 -> 2 while held: fades, no pops",
            juce::String (maxStep (more), 4) + " / " + juce::String (maxStep (fewer), 4));
 
-    r.set (seed::ids::keysFollow, 1.0f);
+    r.set (seed::ids::keyMode, 1.0f); // Seed-12
     auto toggled = r.render (0.3);
     check (maxStep (toggled) < steadyStep * 2.5f, "toggling 'keys follow seed' while held glides", juce::String (maxStep (toggled), 4));
 }
@@ -221,7 +243,7 @@ void testKeys()
     std::cout << "keys follow seed" << std::endl;
     Rig r;
     r.set (seed::ids::seed, 2.5f);
-    r.set (seed::ids::keysFollow, 1.0f);
+    r.set (seed::ids::keyMode, 1.0f); // Seed-12 (was "keys follow seed")
     auto x = tail (r.render (1.0, Rig::noteOn ({ 72 })), 0.5);
     const double want = 261.6255653005986 * 2.5;
     const double on = toneAmp (x, want), off = toneAmp (x, 523.25);
@@ -347,11 +369,207 @@ void testEnvelope()
     check (z.proc->uiActiveVoices.load() == 0, "sustain 0: the note ends by itself while the key is held");
 }
 
+// ================================================================================================
+// v0.3 playground
+// ================================================================================================
+void testConsonance()
+{
+    std::cout << "consonance method (C++ copy of ArtHar's)" << std::endl;
+    auto notesFor = [] (double seed) {
+        xen::PartialEdits e;
+        std::vector<double> pos;
+        for (auto& m : xen::buildPartials (seed, 16, 1.0, e)) pos.push_back (m.cents);
+        xen::ConsonanceCalculator c; xen::CurveResult r; bool complete = false;
+        c.compute (pos, xen::periodCents (seed), {}, r, complete, [] { return false; });
+        juce::String s; for (auto& n : r.notes) s << juce::String (n.cents, 1) << " ";
+        return s.trim();
+    };
+    const auto s2 = notesFor (2.0), s25 = notesFor (2.5);
+    check (s2 == "0.0 386.3 702.0 968.8 1200.0", "seed 2: the 4:5:6:7 chord", s2);
+    check (s25 == "0.0 510.7 927.9 1280.7 1586.3", "seed 2.5: the stretched 4:5:6:7", s25);
+}
+
+void testEdits()
+{
+    std::cout << "calculator edits (sticky offsets, reset = calculator decides again)" << std::endl;
+    Rig r;
+    r.settleCalculator();
+    auto fin = r.proc->finalScale();
+    const int before = fin.count;
+    // Switch note 1 off, move note 2 by +10 c, add a custom note at 100 c.
+    r.set (seed::ids::noteOn (1), 0.0f);
+    r.set (seed::ids::noteOffset (2), 10.0f);
+    r.set (seed::ids::customNoteCents (1), 100.0f);
+    r.set (seed::ids::customNoteOn (1), 1.0f);
+    fin = r.proc->finalScale();
+    int disabled = 0, moved = 0, custom = 0;
+    for (int i = 0; i < fin.count; ++i) { disabled += fin.notes[(size_t) i].enabled ? 0 : 1; moved += fin.notes[(size_t) i].moved; custom += fin.notes[(size_t) i].custom; }
+    check (fin.count == before + 1 && disabled == 1 && moved == 1 && custom == 1, "off / moved / custom notes are marked",
+           juce::String (disabled) + " off, " + juce::String (moved) + " moved, " + juce::String (custom) + " custom");
+    // Reset = back to the calculator.
+    r.set (seed::ids::noteOn (1), 1.0f);
+    r.set (seed::ids::noteOffset (2), 0.0f);
+    r.set (seed::ids::customNoteOn (1), 0.0f);
+    fin = r.proc->finalScale();
+    bool clean = fin.count == before;
+    for (int i = 0; i < fin.count; ++i) clean &= fin.notes[(size_t) i].enabled && ! fin.notes[(size_t) i].moved && ! fin.notes[(size_t) i].custom;
+    check (clean, "removing the edits returns the calculator's scale");
+
+    // Partial level edit: muting partial 2 removes 880 Hz from the sound.
+    Rig q;
+    q.set (seed::ids::partialLevel (2), -60.0f);
+    auto x = tail (q.render (0.8, Rig::noteOn ({ 69 })), 0.4);
+    check (toneAmp (x, 880.0) < 1e-3 && toneAmp (x, 1320.0) > 0.01, "muted partial 2 is silent, partial 3 still there");
+    // Custom partial at +1900 c (a 'stretched fifth over the octave').
+    Rig c;
+    c.set (seed::ids::customPartialCents (1), 1900.0f);
+    c.set (seed::ids::customPartialLevel (1), -6.0f);
+    c.set (seed::ids::customPartialOn (1), 1.0f);
+    auto y = tail (c.render (0.8, Rig::noteOn ({ 69 })), 0.4);
+    const double fc = 440.0 * std::exp2 (1900.0 / 1200.0);
+    check (toneAmp (y, fc) > 0.01, "custom partial sounds at +1900 c", juce::String (toneAmp (y, fc), 4));
+    // Partial shift edit moves partial 3.
+    Rig s;
+    s.set (seed::ids::partialPos (3), 100.0f);
+    auto z = tail (s.render (0.8, Rig::noteOn ({ 69 })), 0.4);
+    check (toneAmp (z, 1320.0 * std::exp2 (100.0 / 1200.0)) > 0.01 && toneAmp (z, 1320.0) < 2e-3, "partial 3 shifted by +100 c");
+}
+
+void testKeyModes()
+{
+    std::cout << "key modes" << std::endl;
+    // Scale mode, seed 2, dissonance @ middle C: key 61 = first found note above the unison.
+    Rig r;
+    r.set (seed::ids::keyMode, 2.0f);
+    r.settleCalculator();
+    const auto fin = r.proc->finalScale();
+    std::array<double, 80> c {}, st {};
+    const int n = fin.playable (c.data(), st.data(), 80);
+    auto x = tail (r.render (0.8, Rig::noteOn ({ 61 })), 0.4);
+    const double want = 261.6255653 * std::exp2 (c[1] / 1200.0);
+    check (n > 3 && toneAmp (x, want) > 0.02, "Scale: key 61 plays scale note 1", juce::String (c[1], 1) + " c = " + juce::String (want, 2) + " Hz");
+    // Key 60 + N = one period up.
+    Rig o;
+    o.set (seed::ids::keyMode, 2.0f);
+    o.settleCalculator();
+    auto y = tail (o.render (0.8, Rig::noteOn ({ 60 + n })), 0.4);
+    check (toneAmp (y, 523.2511) > 0.02, "Scale: key 60 + N = the 'octave'");
+    // Switching a note off shifts the keys above it (the keyboard follows the playable notes).
+    Rig d;
+    d.set (seed::ids::keyMode, 2.0f);
+    d.set (seed::ids::noteOn (1), 0.0f);
+    d.settleCalculator();
+    auto z = tail (d.render (0.8, Rig::noteOn ({ 61 })), 0.4);
+    const double want2 = 261.6255653 * std::exp2 (c[2] / 1200.0);
+    check (toneAmp (z, want2) > 0.02, "Scale: note 1 off -> key 61 plays note 2");
+    // Magnet 100%: every key lands on a scale note.
+    Rig m;
+    m.set (seed::ids::keyMode, 3.0f);
+    m.set (seed::ids::magnet, 100.0f);
+    m.settleCalculator();
+    auto w = tail (m.render (0.8, Rig::noteOn ({ 64 })), 0.4);   // E4 = 400 c -> nearest note 386.3 (5/4)
+    check (toneAmp (w, 261.6255653 * 1.25) > 0.02, "Magnet: key 64 snaps to 5/4 (386.3 c)");
+}
+
+void testPitch()
+{
+    std::cout << "pitch + frequency shift" << std::endl;
+    Rig r;
+    r.set (seed::ids::pitch, 1200.0f);
+    auto x = tail (r.render (0.8, Rig::noteOn ({ 69 })), 0.4);
+    check (toneAmp (x, 880.0) > 0.02 && toneAmp (x, 440.0) < 1e-3, "pitch +1200 c: A4 sounds at 880 Hz");
+    Rig f;
+    f.set (seed::ids::fshift, 100.0f);
+    auto y = tail (f.render (0.8, Rig::noteOn ({ 69 })), 0.4);
+    check (toneAmp (y, 540.0) > 0.02 && toneAmp (y, 980.0) > 0.01 && toneAmp (y, 880.0) < 2e-3,
+           "freq shift +100 Hz: 440->540, 880->980 (inharmonic)");
+}
+
+void testChaosSafety()
+{
+    std::cout << "chaos safety (FX, dice, mods)" << std::endl;
+    // Nasty FX settings: max feedback + spiral + max roughness, everything sent, 64 partials.
+    Rig r;
+    r.set (seed::ids::partials, 64.0f); r.set (seed::ids::rolloff, 0.0f); r.set (seed::ids::gain, 0.0f);
+    r.set (seed::ids::sendA, 100.0f); r.set (seed::ids::ruleA, 0.0f); r.set (seed::ids::delayFb, 95.0f);
+    r.set (seed::ids::spiral, 700.0f); r.set (seed::ids::delayLevel, 6.0f);
+    r.set (seed::ids::sendB, 100.0f); r.set (seed::ids::rough, 100.0f); r.set (seed::ids::rvbDecay, 20.0f); r.set (seed::ids::rvbLevel, 6.0f);
+    r.set (seed::ids::filterMode, 2.0f); r.set (seed::ids::reso, 100.0f); r.set (seed::ids::noise, 0.0f);
+    r.settleCalculator();
+    auto x = r.render (3.0, Rig::noteOn ({ 36, 48, 60, 64, 67, 72 }, 1.0f));
+    check (allFinite (x) && peakOf (x) <= pvst::SafetyStage::kCeiling + 1e-6f, "worst-case FX: finite, under the ceiling",
+           "peak " + juce::String (peakOf (x), 4));
+    auto tailAfter = r.render (2.0);
+    check (allFinite (tailAfter), "FX tail stays finite after notes");
+
+    // Dice everything many times: never NaN, never above the ceiling.
+    bool ok = true;
+    float worst = 0.0f;
+    for (int i = 0; i < 12; ++i)
+    {
+        Rig d;
+        d.proc->randomize (SeedProcessor::Scope::All, 1.0);
+        d.settleCalculator();
+        auto y = d.render (0.6, Rig::noteOn ({ 48, 60, 67 }, 1.0f));
+        ok &= allFinite (y) && peakOf (y) <= pvst::SafetyStage::kCeiling + 1e-6f;
+        worst = std::max (worst, peakOf (y));
+    }
+    check (ok, "12 x Dice (all): finite, under the ceiling", "worst peak " + juce::String (worst, 4));
+
+    // A modulator on the seed actually moves the calculator.
+    Rig m;
+    m.set (seed::ids::modTarget (1), 1.0f); // Seed
+    m.set (seed::ids::modShape (1), 3.0f);  // Square
+    m.set (seed::ids::modRate (1), 0.25f);
+    m.set (seed::ids::modDepth (1), 100.0f);
+    m.render (0.5);
+    const double s1 = m.proc->currentCalculatorSettings().seed;
+    m.render (2.0);
+    const double s2 = m.proc->currentCalculatorSettings().seed;
+    check (std::abs (s1 - s2) > 0.5, "mod 1 (square) on Seed swings the calculator's seed", juce::String (s1, 3) + " -> " + juce::String (s2, 3));
+}
+
+void testPresets()
+{
+    std::cout << "presets" << std::endl;
+    auto folder = SeedProcessor::presetFolder();
+    const auto name = "zz-test-" + juce::String (juce::Random::getSystemRandom().nextInt (100000));
+    Rig a;
+    a.set (seed::ids::seed, 2.7f);
+    a.set (seed::ids::noteOn (3), 0.0f);
+    a.set (seed::ids::cutoff, 555.0f);
+    a.set (seed::ids::filterMode, 1.0f);
+    check (a.proc->savePreset (name), "save preset");
+    const auto file = folder.getChildFile (name + ".seedpreset");
+
+    Rig t; // Tuning only: seed + note edit come in, the filter stays as it was.
+    t.set (seed::ids::cutoff, 3000.0f);
+    t.proc->loadPreset (file, SeedProcessor::Scope::Tuning);
+    auto val = [&t] (const juce::String& id) { auto* p = t.proc->apvts.getParameter (id); return p->convertFrom0to1 (p->getValue()); };
+    check (std::abs (val (seed::ids::seed) - 2.7f) < 1e-3 && val (seed::ids::noteOn (3)) < 0.5f && std::abs (val (seed::ids::cutoff) - 3000.0f) < 1.0f,
+           "load Tuning only: tuning + edits in, sound untouched");
+    Rig s; // Sound only.
+    s.proc->loadPreset (file, SeedProcessor::Scope::Sound);
+    auto val2 = [&s] (const juce::String& id) { auto* p = s.proc->apvts.getParameter (id); return p->convertFrom0to1 (p->getValue()); };
+    check (std::abs (val2 (seed::ids::seed) - 2.0f) < 1e-3 && std::abs (val2 (seed::ids::cutoff) - 555.0f) < 1.0f,
+           "load Sound only: filter in, seed untouched");
+    file.deleteFile();
+}
+
 void snapshot (const juce::File& file)
 {
     SeedProcessor proc;
-    proc.apvts.getParameter (seed::ids::seed)->setValueNotifyingHost (proc.apvts.getParameter (seed::ids::seed)->convertTo0to1 (2.5f));
+    auto setp = [&proc] (const juce::String& id, float v) { auto* p = proc.apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+    setp (seed::ids::seed, 2.5f);
+    // Show some edits so the orange markers are visible in the snapshot.
+    setp (seed::ids::noteOn (2), 0.0f);
+    setp (seed::ids::noteOffset (4), 25.0f);
+    setp (seed::ids::customNoteCents (1), 1450.0f); setp (seed::ids::customNoteOn (1), 1.0f);
+    setp (seed::ids::partialLevel (3), -12.0f);
+    setp (seed::ids::customPartialCents (1), 2100.0f); setp (seed::ids::customPartialOn (1), 1.0f);
+    if (auto* tab = std::getenv ("SEED_TAB")) juce::ignoreUnused (tab);
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
+    if (auto* tab = std::getenv ("SEED_TAB")) static_cast<SeedEditor*> (ed.get())->showTab (juce::String (tab).getIntValue());
     juce::MessageManager::getInstance()->runDispatchLoopUntil (900); // calculator + animations settle
     auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
     juce::FileOutputStream out (file);
@@ -374,6 +592,12 @@ int main (int argc, char** argv)
     testCurve();
     testVelocity();
     testEnvelope();
+    testConsonance();
+    testEdits();
+    testKeyModes();
+    testPitch();
+    testChaosSafety();
+    testPresets();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")
             snapshot (juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]));

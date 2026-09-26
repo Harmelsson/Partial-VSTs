@@ -2,17 +2,16 @@
 
 _Last updated: 2026-09-26 (session 1)_
 
-## IN PROGRESS — Seed Playground (v0.3.x)
-User is away for a few hours; asked for a big experimental "chaotic mess" to curate on return.
-Plan + phase checklist: `docs/PLAYGROUND.md`. Each phase is committed separately; if a session
-ends mid-way, continue at the first unchecked phase there.
+## Seed Playground v0.3.0 — built while the user was away
+Design, feature list and HOW TO USE: `docs/PLAYGROUND.md`. User's job on return: try it, decide
+what to keep / delete / split into a new synth / change. 55/55 headless checks pass.
 
 ## What exists
-- **Seed v0.2.0** (`plugins/Seed/`, see its README): ArtHar-style redesign; Calculator bar on top
-  (Fundamental, Seed, Partials, Rolloff, Min dip strength) with live dissonance curve, partials
-  plot and scale table; full ADSR (draggable envelope picture) + velocity sensitivity.
-  35 headless checks pass on Linux (`tools/SeedTests.cpp`), incl. the C++ dissonance copy
-  reproducing ArtHar's pinned notes (seed 2: 315.6 386.3 498.0 582.5 702.0 813.7 884.4 968.8).
+- **Seed v0.3.0 playground** (`plugins/Seed/`): calculator (dissonance + consonance, hand edits
+  of partials/notes, custom partials/notes) strictly separate from the synth (key modes 12-EDO /
+  Seed-12 / Scale / Magnet, life, glide, pitch + freq shift, additive + subtractive tools, Partial
+  Delay, Rough Reverb, 4 modulators, Dice/Mutate, presets with All/Tuning/Sound scope).
+  ~300 automatable params. 55 headless checks (`tools/SeedTests.cpp`).
 - **Shared kit for all future synths** (`shared/`): `xen/` Stretch, Dissonance (copy of ArtHar's
   method), CalculatorWorker (background thread); `ui/` Theme (ArtHar two-colour), Controls
   (per-digit ScrubBox, SegmentedToggle), SquareLattice (square-dot plots + afterglow),
@@ -22,7 +21,9 @@ ends mid-way, continue at the first unchecked phase there.
   Release `build-5` = v0.1.0; **Release `build-6` = Seed v0.2.0** (green, 08:00 UTC):
   https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-6
 
-## User should test (Seed v0.2.0) — install guide: docs/TESTING.md
+## User should test (Seed v0.3.0) — see docs/PLAYGROUND.md "How to use it"
+Older v0.2 checklist below still applies.
+## (v0.2.0 checklist)
 1. Look & feel vs ArtHar. Scrub digits of Seed while a note is held: curve, table, partials and
    the sound should all move together.
 2. Velocity: soft vs hard notes. Envelope: drag the three hollow corners; try Sustain 0 (plucks).

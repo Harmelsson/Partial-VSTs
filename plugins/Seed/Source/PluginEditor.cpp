@@ -305,13 +305,13 @@ void SeedEditor::buildPages()
     auto& mod = pages[5];
     for (int m = 1; m <= kNumMods; ++m)
     {
-        choice (mod, ids::modShape (m), "Mod " + juce::String (m) + " shape", modShapeNames(), 116);
-        box (mod, ids::modRate (m), "Rate (Hz)", 2, 3, 0.1, 104);
-        box (mod, ids::modDepth (m), "Depth (%)", 3, 0, 5.0, 96);
-        choice (mod, ids::modTarget (m), "Target", modTargetNames(), 124);
+        choice (mod, ids::modShape (m), "Mod " + juce::String (m) + " shape", modShapeNames(), 104);
+        box (mod, ids::modRate (m), "Rate (Hz)", 2, 3, 0.1, 92);
+        box (mod, ids::modDepth (m), "Depth (%)", 3, 0, 5.0, 84);
+        choice (mod, ids::modTarget (m), "Target", modTargetNames(), 118);
         auto meter = std::make_unique<ModMeter> (proc.uiModValue[(size_t) m - 1]);
         meters.push_back (meter.get());
-        mod.add (*meter, 60);
+        mod.add (*meter, 44);
         owned.push_back (std::move (meter));
         if (m % 2 == 0) mod.newLine();
     }
@@ -408,18 +408,18 @@ void SeedEditor::resized()
     {
         auto row = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
         auto place = [&] (juce::Component& c, int w) { c.setBounds (row.removeFromLeft (w)); row.removeFromLeft (14); };
-        place (fundamentalBox, 120);
-        place (seedBox, 140);
-        place (partialsBox, 72);
-        place (rolloffBox, 84);
-        place (methodSeg, 210);
-        place (minDipBox, 96);
-        place (toleranceBox, 104);
-        place (minSharedBox, 86);
+        place (fundamentalBox, 116);
+        place (seedBox, 134);
+        place (partialsBox, 66);
+        place (rolloffBox, 78);
+        place (methodSeg, 200);
+        place (minDipBox, 90);
+        place (toleranceBox, 98);
+        place (minSharedBox, 80);
         auto buttons = row.withHeight (28).withY (row.getY() + 19);
-        resetEdits.setBounds (buttons.removeFromLeft (100));
+        resetEdits.setBounds (buttons.removeFromLeft (96));
         buttons.removeFromLeft (8);
-        diceTuning.setBounds (buttons.removeFromLeft (100));
+        diceTuning.setBounds (buttons.removeFromLeft (96));
     }
     b.removeFromTop (gap);
     auto middle = b.removeFromTop (430);

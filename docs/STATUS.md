@@ -3,34 +3,31 @@
 _Last updated: 2026-09-26 (session 1)_
 
 ## What exists
-- Workflow + docs only: `CLAUDE.md` (session protocol), `docs/` (STATUS, LOG, LESSONS, IDEAS).
-- **IN PROGRESS — Seed v0.1.0 + pipeline:** code written (CMake/JUCE 8.0.15, `shared/`,
-  `plugins/Seed/`, `tools/SeedTests.cpp`) but NOT yet compiled/tested. Next concrete steps:
-  build on Linux (`cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build`),
-  run `build/tools/SeedTests_artefacts/Release/SeedTests`, fix, then add the GitHub Actions
-  workflow + `docs/TESTING.md`, then hand over.
-- ArtHar calculator (Rust, `Harmelsson/arthar`, v1.0) reviewed → `docs/ARTHAR_REFERENCE.md`.
-  Separate project; math is *copied* to C++ (`shared/xen/`), never linked.
+- **Seed v0.1.0** (`plugins/Seed/`, see its README): stretched-partial additive synth, 64 partials,
+  16 voices, live glides on held notes, keys-follow-seed, drone, gentle custom UI.
+  22 headless checks pass on Linux (`tools/SeedTests.cpp`).
+- Pipeline: CMake + JUCE 8.0.15 (FetchContent). GitHub Actions (`.github/workflows/build.yml`)
+  builds Windows VST3 + standalone, runs tests, uploads zip `PartialVSTs-windows-build-N`.
+  CI run #1 (commit 026c59f) was in progress at time of writing — check result first.
+- `shared/`: `xen/Stretch.h` (copied math), `dsp/SafetyStage.h` (non-bypassable), `ui/` (theme,
+  SmoothKnob, SmoothToggle).
+- Docs: CLAUDE.md, docs/{STATUS, LOG, LESSONS, IDEAS, TESTING, ARTHAR_REFERENCE, SEED_NOTE_LIFE}.
 
-## Decided
-- First plugin: **Seed** (user loves the name). Smooth, friendly synth UI (gentler scrubbing).
-- Math from ArtHar is copied to C++, not linked.
+## User should test (Seed v0.1.0) — install guide: docs/TESTING.md
+1. Seed 2.0, hold a note: should sound like a soft, plain saw-ish tone.
+2. Hold a note/chord and scrub Seed slowly: partials should glide, never click.
+3. Seed below 1 (undertones), exactly 1 (collapse), 3–4 (bells): weird on purpose.
+4. Partials / Rolloff while holding: smooth fades.
+5. "Keys follow seed" on: 12 keys = the seed's octave; toggling while holding glides.
+6. Drone on: sound without MIDI. Middle-click resets a knob, double-click types a value.
+7. Knob feel: too slow/fast? Bottom-right label must show the downloaded build number.
 
-## Proposed plan
-1. **Task 0 — Pipeline ("v0.0")**: JUCE CMake scaffold + shared safety stage + GitHub Actions
-   that builds Windows VST3 → user downloads a zip, drops it in
-   `C:\Program Files\Common Files\VST3`, FL Studio finds it. Plus `docs/TESTING.md` (install guide).
-   Proven with the first real plugin, not an empty "hello" plugin.
-2. **Task 1 — first plugin**: recommended **Seed** (I1 in IDEAS.md), alternative **Stretch
-   Resonator** (F1).
-3. Then alternate: one weird experiment ↔ one building-block tool.
+## Next
+- **Seed v0.2**: user picks from `docs/SEED_NOTE_LIFE.md` (agent recommends Magnet keyboard +
+  Life knob). Needs C++ copy of the dissonance curve.
+- Possibly: per-digit scrubbing for the seed value (ArtHar-style) if the knob is too coarse.
 
 ## Open questions for the user
-- Branch/merge policy: each session runs on its own `claude/*` branch. Merge to `main` after each
-  session (via PR), or allow the agent to merge itself? Unmerged branches risk a future session
-  not seeing the latest docs.
-- Can you download build artifacts from GitHub (logged-in, Actions tab)? Alternative: GitHub
-  Releases page.
-
-## What to test right now
-Nothing yet.
+- Birth/death design pick (SEED_NOTE_LIFE.md).
+- Merge policy: each session runs on its own `claude/*` branch. Merge to `main` after each session,
+  or let the agent merge? (Unmerged work may be invisible to the next session.)

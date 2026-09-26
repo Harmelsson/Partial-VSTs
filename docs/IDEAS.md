@@ -16,11 +16,12 @@ cross-note consonance `R ≈ (m/n)^S`.
 
 | # | Name (working) | What it does | Weird | Risk | Status |
 |---|---|---|---|---|---|
-| I1 | **Seed** | The ArtHar Calculator made playable: additive synth, partials at `n^log2(seed)`, rolloff, drone mode, per-partial mute. Later: keyboard mapped to the calculator's found scale (dissonance-curve dips) instead of 12-EDO. Seed 2.0 must sound like a plain saw-ish tone (built-in ear check). | 🟡 | low | idea — **recommended first** |
+| I1 | **Seed** | The ArtHar Calculator made playable: additive synth, partials at `n^log2(seed)`, rolloff, drone mode, per-partial mute. Later: keyboard mapped to the calculator's found scale (dissonance-curve dips) instead of 12-EDO. Seed 2.0 must sound like a plain saw-ish tone (built-in ear check). | 🟡 | low | **testing** — v0.1.0 built (no scale mapping yet); v0.2 design in SEED_NOTE_LIFE.md |
 | I2 | **Bellmaker** | Arithmetic partial series (`F, M·F, (2M−1)·F…`) — every register sounds different, bell/metallophone-like. | 🟡 | low | idea |
 | I3 | **Chameleon** | Timbre bends to the chord: when you hold several notes, each voice's partials drift toward positions that make them consonant with the *other* held notes (Sethares in real time). Any chord "resolves" by changing timbre, not pitch. | 🔴 | med | idea |
 | I4 | **Magnets** | The opposite: held notes' *pitches* glide toward nearby roughness minima relative to each other — chords settle into place by themselves, like the dancing XP squares. | 🔴 | med | idea |
 | I5 | **Swarm** | Partials are particles with physics: springs to their "home" position, repulsion from dissonant neighbors, damping. Sound evolves on its own; knobs set gravity/temperature. | 🔴 | med | idea |
+| I7 | **Mitosis** | Voices split/fuse as dissonance valleys split/merge (from SEED_NOTE_LIFE.md; may become a Seed mode). | 🔴 | med | idea |
 | I6 | **Seed Morph** | XY pad / single "Hand of God" slider sliding continuously between two seeds (or two EDOs) live — tuning *and* timbre morph together as a playable gesture. | 🔴 | low | idea (could be a mode of I1) |
 
 ## Effects (audio in → audio out)

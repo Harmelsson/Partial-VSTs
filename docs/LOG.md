@@ -53,3 +53,17 @@ holding a note must be heard live; since notes' positions change, notes may be c
 while playing → wants ideas for that problem. Seed is a synth → smoother, less intimidating UI,
 gentler scrubbing/scrolling.
 **Done:** CLAUDE.md + ARTHAR_REFERENCE.md rewritten to match (no oracle/linking, dynamic rule).
+
+## 2026-09-26 — session 1 — Seed v0.1.0 + build pipeline
+**Done:**
+- CMake/JUCE 8.0.15 scaffold, shared safety stage + stretch math + gentle UI widgets.
+- Seed v0.1.0: additive synth with rotator oscillators, control-rate (32 samples) smoothing
+  (~30 ms), power-normalised voices, Nyquist and sub-audio fades, 16-voice stealing, drone,
+  pitch bend ±2 st, keys-follow-seed (blends 100 c/key ↔ period/12 per key, so toggling glides).
+- `tools/SeedTests`: 22 checks — all PASS on Linux (spectrum 1/n exact to 3 decimals, seed-2.5
+  partial 2 at 1100 Hz, glide max-step 0.099 vs steady 0.078, worst-case peak = 0.794, state).
+- UI snapshot checked via xvfb (`SeedTests --snapshot`); first layout had overlaps → fixed.
+- GitHub Actions Windows workflow + docs/TESTING.md (install guide for the user).
+- docs/SEED_NOTE_LIFE.md: 6 ideas for notes born/dying while held (user asked for ideas).
+**Worked first try:** compile (only -Wfloat-equal warnings, fixed with juce::exactlyEqual).
+**Not verified yet:** the Windows CI build itself, and anything in real FL Studio.

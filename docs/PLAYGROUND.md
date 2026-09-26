@@ -54,11 +54,28 @@ synth, or change." ~1.5 h of experimentation._
 - **Synth tabs**: Keys & pitch (key modes, magnet, life, glide, pitch/freq shift, bend, drone,
   gain) · Envelope · Timbre (tilt, odd/even, spread, shimmer, formant) · Filter & noise ·
   FX (Partial Delay, Rough Reverb) · Modulators (4 × shape/rate/depth/target, live meter).
-  *Mutate sound* = small random nudge, *Dice sound* = randomise the whole synth half.
+  *Dice page / Mutate page / Reset page* act on the open tab only (v0.4).
 - **v0.3.1 chaos toys**: *Chord size / step* (Keys tab): one key plays a stack; in Scale mode the
   step counts SCALE DEGREES (great with Consonance scales). *Wander* (Timbre): every partial
   drifts on its own random path (± cents, rate). *Scramble* (Timbre): partials swap loudness.
 - Everything above is a host parameter → automatable in FL (≈300 params, names say what they are).
+
+## v0.4.0 changes (user feedback on build 9)
+- **Notes clearly visible** on the curve (solid guide lines, bigger squares), and **played notes
+  light up** like ArtHar: the note's line turns bright, its square grows, its row in the Scale table
+  lights up; released notes fade (0.18 s). Works in every key mode.
+- **Key mode default = Scale** (keys = switched-on notes in order). The "12 selectable keys" idea
+  was built and then withdrawn by the user ("I can do it by disabling/enabling notes").
+- **Envelope**: attack / decay / release go down to **0 ms** and show **2 decimals**.
+- **Method settings** only show for the chosen method (Min dip ↔ Tolerance + Min shared).
+- **Bug fixed**: two quick middle-clicks no longer add a note/partial (only left double-click adds).
+- **Scale ticks (ArtHar v1.15)**: new PARTIALS table (right, under Scale) with a *Scale* column.
+  Ticked = the partial shapes the scale; unticked = sound only (drawn dotted). Hand-added partials
+  start unticked; seed partials ticked; the fundamental always in. Mouse wheel scrolls both tables.
+- **Dice / Mutate / Reset per page** (buttons right of the tabs act on the open page only).
+  *Dice tuning* stays in the calculator. **Init** (header) = everything back to defaults.
+- **Reset edits** now also clears Scale ticks and removes modulators aimed at calculator values
+  (Seed, Fundamental, Rolloff, Min dip) — user: "Reset edits doesn't reset everything".
 
 ## Recipes to start from (for curating)
 1. **Consonant chord machine**: Method = Consonance · Key mode = Scale · Chord size 3, step 1 →

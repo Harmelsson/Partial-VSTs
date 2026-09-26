@@ -78,6 +78,10 @@ public:
         frameMax = std::max (600.0, std::ceil (span / 600.0) * 600.0); // steady frame, 600-cent steps
     }
     void setScale (const xen::FinalScale& s) { scale = s; }
+    /// Optional label drawn above each note (index = FinalScale index), e.g. the key playing it.
+    void setNoteLabels (std::vector<juce::String> l) { labels = std::move (l); }
+    /// 0..1 per FinalScale note: how "lit" it is because it's being played (ArtHar's emphasis).
+    void setEmphasis (std::vector<float> e) { emphasis = std::move (e); }
     void setBusy (bool b) { busy = b; }
     void tick (float dt) { lastDt = dt; repaint(); }
 
@@ -147,31 +151,45 @@ public:
             return;
         }
 
+        // Notes: a clear vertical line, a big hollow square on the curve, and the key label on top
+        // (user v0.3.1: "notes barely visible").
         for (int i = 0; i < scale.count; ++i)
         {
             const auto& n = scale.notes[(size_t) i];
             const float x = xOf (n.cents);
             const bool mod = n.moved || n.custom;
-            const juce::Colour col = ! n.enabled ? theme::mix (0.3f) : mod ? theme::modified
-                                   : theme::mix (0.55f + 0.9f * (float) n.strength);
-            plot::verticalDotted (g, x, data.getY(), data.getBottom(), mod ? theme::modified.withAlpha (0.5f) : theme::mix (n.kind == xen::ScaleNote::Found ? 0.3f : 0.45f));
+            const float e = (size_t) i < emphasis.size() ? emphasis[(size_t) i] : 0.0f; // being played
+            const juce::Colour col = ! n.enabled ? theme::mix (0.35f) : mod ? theme::modified : theme::fg;
+            g.setColour (col.withAlpha ((n.enabled ? 0.55f : 0.25f) + 0.45f * e));
+            g.fillRect (x - 0.5f - e, data.getY(), 1.2f + 2.0f * e, data.getHeight());
             if (n.moved) // faint square at its home, like ArtHar
-                SquareLattice::hollowSquare (g, { xOf (n.home), data.getBottom() - 6.0f }, 6.0f, theme::modified.withAlpha (0.5f));
+                SquareLattice::hollowSquare (g, { xOf (n.home), data.getBottom() - 6.0f }, 7.0f, theme::modified.withAlpha (0.6f));
             const int colIdx = juce::jlimit (0, cols - 1, lattice.colAt (x));
             const float h = juce::jmax (0.0f, shown[(size_t) colIdx]);
             const float y = lattice.rowCentreY ((int) std::round (h * (float) (lattice.numRows() - 1)));
-            SquareLattice::hollowSquare (g, { x, y }, 10.0f, col);
+            const float side = 14.0f + 10.0f * e; // a played note's square grows
+            g.setColour (theme::bg);
+            g.fillRect (juce::Rectangle<float> (side, side).withCentre ({ x, y }));
+            g.setColour (col);
+            g.drawRect (juce::Rectangle<float> (side, side).withCentre ({ x, y }), 2.0f);
+            g.fillRect (juce::Rectangle<float> (4.0f + 8.0f * e, 4.0f + 8.0f * e).withCentre ({ x, y }));
             if (! n.enabled)
             {
-                g.setColour (theme::mix (0.6f));
-                g.drawLine (x - 5, y - 5, x + 5, y + 5, 1.2f);
-                g.drawLine (x - 5, y + 5, x + 5, y - 5, 1.2f);
+                g.drawLine (x - 6, y - 6, x + 6, y + 6, 1.4f);
+                g.drawLine (x - 6, y + 6, x + 6, y - 6, 1.4f);
+            }
+            if ((size_t) i < labels.size() && labels[(size_t) i].isNotEmpty())
+            {
+                g.setFont (theme::sans (11.5f, true));
+                g.setColour (col);
+                g.drawText (labels[(size_t) i], juce::Rectangle<float> (x - 20.0f, data.getY() + 1.0f, 40.0f, 13.0f), juce::Justification::centred);
             }
         }
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        lastDownWasLeft = e.mods.isLeftButtonDown() && ! e.mods.isAltDown();
         const int i = noteAt (e.position.x);
         if (i < 0) return;
         const auto n = scale.notes[(size_t) i];
@@ -197,6 +215,8 @@ public:
     }
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        // Only a LEFT double-click adds (two quick middle-clicks used to add notes by accident).
+        if (! lastDownWasLeft) return;
         if (noteAt (e.position.x) >= 0 || ! detail::plotArea (getLocalBounds()).contains (e.position)) return;
         if (onAdd) onAdd (centsAt (e.position.x));
     }
@@ -214,6 +234,9 @@ private:
 
     xen::CalculatorOutput result;
     xen::FinalScale scale;
+    std::vector<juce::String> labels;
+    std::vector<float> emphasis;
+    bool lastDownWasLeft = false;
     SquareLattice lattice;
     std::vector<float> shown;
     double frameMax = 1800.0;
@@ -241,11 +264,13 @@ public:
     {
         lastDt = dt;
         std::array<bool, kSlots> present {};
+        soundOnly.fill (false);
         double lo = 0.0, hi = 0.0;
         for (auto& p : parts)
         {
             const auto i = (size_t) p.index;
             present[i] = true;
+            soundOnly[i] = ! p.inScale;
             const double h = std::min (1.0, p.amp);
             cents[i] = first[i] ? p.cents : theme::ease ((float) cents[i], (float) p.cents, 0.3f);
             height[i] = first[i] ? h : theme::ease ((float) height[i], (float) h, 0.3f);
@@ -279,7 +304,8 @@ public:
         {
             if (height[i] < 0.004) continue;
             const double hz = fundamental * std::exp2 (cents[i] / 1200.0);
-            lattice.column (lattice.colAt (xOf (cents[i])), (float) height[i], hz >= 20.0 && hz <= 20000.0 ? 1.0f : 0.35f);
+            // "Sound only" partials (unticked in the Scale column) are drawn dotted, like ArtHar.
+            lattice.column (lattice.colAt (xOf (cents[i])), (float) height[i], hz >= 20.0 && hz <= 20000.0 ? 1.0f : 0.35f, soundOnly[i], 0.0f);
         }
         lattice.paint (g, lastDt);
 
@@ -302,6 +328,7 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        lastDownWasLeft = e.mods.isLeftButtonDown() && ! e.mods.isAltDown();
         const int i = partialAt (e.position.x);
         if (i < 0) return;
         const auto p = parts[(size_t) i];
@@ -332,7 +359,7 @@ public:
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
         const auto area = detail::plotArea (getLocalBounds());
-        if (partialAt (e.position.x) >= 0 || ! area.contains (e.position)) return;
+        if (! lastDownWasLeft || partialAt (e.position.x) >= 0 || ! area.contains (e.position)) return;
         const double c = frameMin + (e.position.x - area.getX()) / area.getWidth() * (frameMax - frameMin);
         const double a = juce::jlimit (0.05, 1.0, (double) ((area.getBottom() - e.position.y) / area.getHeight()));
         if (onAdd) onAdd (std::max (1.0, c), a);
@@ -353,6 +380,8 @@ private:
     double seed = 2.0, fundamental = 261.63;
     SquareLattice lattice;
     std::array<double, kSlots> cents {}, height {};
+    std::array<bool, kSlots> soundOnly {};
+    bool lastDownWasLeft = false;
     std::array<bool, kSlots> first = [] { std::array<bool, kSlots> a {}; a.fill (true); return a; }();
     double frameMin = 0.0, frameMax = 7200.0;
     float lastDt = 1.0f / 60.0f;
@@ -372,6 +401,7 @@ public:
     {
         scale = s; fundamental = fundamentalHz; footerText = footer; repaint();
     }
+    void setEmphasis (std::vector<float> e) { emphasis = std::move (e); }
 
     void paint (juce::Graphics& g) override
     {
@@ -388,14 +418,18 @@ public:
         g.drawText (footerText, foot, juce::Justification::centredLeft);
 
         rows.clear();
-        const int maxRows = juce::jmax (1, inner.getHeight() / kRowH);
-        const int shownRows = scale.count > maxRows ? maxRows - 1 : scale.count;
+        maxRows = juce::jmax (1, inner.getHeight() / kRowH);
+        first = juce::jlimit (0, juce::jmax (0, scale.count - maxRows), first);
+        const int shownRows = juce::jmin (maxRows, scale.count - first);
         int found = 0;
-        for (int i = 0; i < shownRows; ++i)
+        for (int r = 0; r < shownRows; ++r)
         {
+            const int i = first + r;
             const auto& n = scale.notes[(size_t) i];
             auto row = inner.removeFromTop (kRowH);
             rows.push_back ({ row, i });
+            const float e = (size_t) i < emphasis.size() ? emphasis[(size_t) i] : 0.0f;
+            if (e > 0.01f) { g.setColour (theme::mix (0.22f * e)); g.fillRect (row); } // being played
             const bool mod = n.moved || n.custom || ! n.enabled;
             const auto textCol = ! n.enabled ? theme::mix (0.35f) : mod ? theme::modified : theme::text();
             if (n.kind == xen::ScaleNote::Found) ++found;
@@ -412,7 +446,7 @@ public:
                 g.drawRect (box, 1.0f);
             }
             g.setColour (textCol);
-            g.setFont (theme::sans (12.5f));
+            g.setFont (theme::sans (12.5f, e > 0.3f));
             g.drawText (name, row.getX() + colX[1], row.getY(), 64, kRowH, juce::Justification::centredLeft);
             g.setFont (theme::mono (12.5f));
             const double ratio = xen::centsToRatio (n.cents);
@@ -434,9 +468,16 @@ public:
         if (shownRows < scale.count)
         {
             g.setColour (theme::dim());
-            g.setFont (theme::sans (12.0f));
-            g.drawText ("+ " + juce::String (scale.count - shownRows) + " more", inner.removeFromTop (kRowH), juce::Justification::centredLeft);
+            g.setFont (theme::sans (11.0f));
+            g.drawText (juce::String (first + 1) + "-" + juce::String (first + shownRows) + " of " + juce::String (scale.count) + "  (scroll)",
+                        foot, juce::Justification::centredRight);
         }
+    }
+
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        first = juce::jlimit (0, juce::jmax (0, scale.count - maxRows), first + (w.deltaY < 0 ? 2 : -2));
+        repaint();
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -454,8 +495,98 @@ public:
 private:
     static constexpr int kRowH = 19;
     xen::FinalScale scale;
+    std::vector<float> emphasis;
+    int first = 0, maxRows = 1;
     double fundamental = 261.63;
     juce::String footerText;
     std::vector<std::pair<juce::Rectangle<int>, int>> rows;
 };
+// ================================================================================================
+/// The calculator's partials as a table (ArtHar's PARTIALS table), with the SCALE tick column
+/// (ArtHar v1.15): ticked = the partial shapes the scale; unticked = "sound only" (played, but the
+/// scale ignores it). The fundamental is always in. Mouse wheel scrolls.
+class PartialsTable : public juce::Component
+{
+public:
+    std::function<void (const xen::ModelPartial&)> onToggleScale;
+
+    void setPartials (const std::vector<xen::ModelPartial>& p, double fundamentalHz)
+    {
+        parts = p; fundamental = fundamentalHz;
+        first = juce::jlimit (0, juce::jmax (0, (int) parts.size() - visibleRows()), first);
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto inner = theme::drawSection (g, getLocalBounds(), "Partials");
+        g.setColour (theme::dim());
+        g.setFont (theme::sans (11.5f));
+        g.drawText ("Scale = shapes the scale", getLocalBounds().reduced (10, 6).removeFromTop (18), juce::Justification::centredRight);
+        const int colX[] = { 0, 30, 96, 170, 240, 300 };
+        const char* heads[] = { "#", "Hz", "Cents", "Ratio", "Loud", "Scale" };
+        g.setColour (theme::text());
+        g.setFont (theme::sans (12.5f));
+        auto head = inner.removeFromTop (18);
+        for (int i = 0; i < 6; ++i) g.drawText (heads[i], head.getX() + colX[i], head.getY(), 70, 18, juce::Justification::centredLeft);
+        rows.clear();
+        const int n = visibleRows();
+        for (int r = 0; r < n && first + r < (int) parts.size(); ++r)
+        {
+            const auto& p = parts[(size_t) (first + r)];
+            auto row = inner.removeFromTop (kRowH);
+            rows.push_back ({ row, first + r });
+            const bool mod = p.custom || p.moved || p.levelEdited;
+            g.setColour (p.amp <= 0.0 ? theme::mix (0.35f) : mod ? theme::modified : theme::text());
+            g.setFont (theme::sans (12.5f));
+            g.drawText (p.custom ? "c" + juce::String (p.index - xen::kSeriesPartials + 1) : juce::String (p.index + 1),
+                        row.getX() + colX[0], row.getY(), 30, kRowH, juce::Justification::centredLeft);
+            g.setFont (theme::mono (12.0f));
+            const double ratio = xen::centsToRatio (p.cents);
+            g.drawText (juce::String (fundamental * ratio, 1), row.getX() + colX[1], row.getY(), 70, kRowH, juce::Justification::centredLeft);
+            g.drawText (juce::String (p.cents, 1), row.getX() + colX[2], row.getY(), 70, kRowH, juce::Justification::centredLeft);
+            g.drawText (juce::String (ratio, 3), row.getX() + colX[3], row.getY(), 60, kRowH, juce::Justification::centredLeft);
+            g.drawText (juce::String (std::min (1.0, p.amp), 3), row.getX() + colX[4], row.getY(), 60, kRowH, juce::Justification::centredLeft);
+            auto box = juce::Rectangle<float> ((float) (row.getX() + colX[5]) + 12.0f, (float) row.getCentreY() - 5.0f, 10.0f, 10.0f);
+            const bool fixed = ! p.custom && p.index == 0;
+            g.setColour (fixed ? theme::mix (0.35f) : p.inScale != (p.custom ? false : true) ? theme::modified : theme::mix (0.8f));
+            if (p.inScale) g.fillRect (box.reduced (2.0f));
+            g.drawRect (box, 1.0f);
+        }
+        if ((int) parts.size() > n)
+        {
+            g.setColour (theme::dim());
+            g.setFont (theme::sans (11.0f));
+            g.drawText (juce::String (first + 1) + "-" + juce::String (juce::jmin ((int) parts.size(), first + n)) + " of " + juce::String ((int) parts.size()) + "  (scroll)",
+                        getLocalBounds().reduced (10, 4).removeFromBottom (14), juce::Justification::centredRight);
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        for (auto& [r, i] : rows)
+            if (r.contains (e.getPosition()) && e.position.x > (float) (r.getX() + 290))
+            {
+                const auto& p = parts[(size_t) i];
+                if (! p.custom && p.index == 0) return; // the fundamental is always in
+                if (onToggleScale) onToggleScale (p);
+                return;
+            }
+    }
+
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        first = juce::jlimit (0, juce::jmax (0, (int) parts.size() - visibleRows()), first + (w.deltaY < 0 ? 2 : -2));
+        repaint();
+    }
+
+private:
+    static constexpr int kRowH = 17;
+    int visibleRows() const { return juce::jmax (1, (getHeight() - 6 - 18 - 18 - 16) / kRowH); }
+    std::vector<xen::ModelPartial> parts;
+    double fundamental = 261.63;
+    int first = 0;
+    std::vector<std::pair<juce::Rectangle<int>, int>> rows;
+};
+
 } // namespace pvst

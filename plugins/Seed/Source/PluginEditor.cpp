@@ -18,7 +18,7 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &prevPreset, &presetName, &nextPreset, &savePreset, &scopeBtn, &fundamentalBox, &seedBox, &partialsBox,
              &rolloffBox, &methodSeg, &minDipBox, &toleranceBox, &minSharedBox, &resetEdits, &diceTuning, &curvePlot,
-             &partialsPlot, &scaleTable, &mutateBtn, &diceSound })
+             &partialsPlot, &scaleTable, &partialsTable, &dicePage, &mutatePage, &resetPage, &initAll })
         addAndMakeVisible (c);
     addChildComponent (presetNameEditor);
     presetNameEditor.setFont (th::sans (14.0f));
@@ -65,24 +65,22 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
 
     // ---- Chaos + reset ----------------------------------------------------------------------
     diceTuning.onClick = [this] { proc.randomize (SeedProcessor::Scope::Tuning, 1.0); };
-    diceSound.onClick = [this] { proc.randomize (SeedProcessor::Scope::Sound, 1.0); };
-    mutateBtn.onClick = [this] { proc.randomize (SeedProcessor::Scope::Sound, 0.15); };
-    resetEdits.onClick = [this] {
-        for (auto* prm : proc.getParameters())
-            if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (prm))
-            {
-                const auto id = rp->getParameterID();
-                if (isTuningParam (id) && (id.startsWith ("p") || id.startsWith ("cp") || id.startsWith ("n") || id.startsWith ("cn"))
-                    && id != ids::partials)
-                    rp->setValueNotifyingHost (rp->getDefaultValue());
-            }
+    dicePage.onClick = [this] { proc.randomizeParams (pageIds[(size_t) currentTab], 1.0); };
+    mutatePage.onClick = [this] { proc.randomizeParams (pageIds[(size_t) currentTab], 0.15); };
+    resetPage.onClick = [this] { proc.resetParams (pageIds[(size_t) currentTab]); };
+    initAll.onClick = [this] { proc.initAll(); refreshPresetLabel(); };
+    // Every hand edit, Scale tick and calculator-aimed modulation goes; core settings stay.
+    resetEdits.onClick = [this] { proc.resetCalculatorEdits(); };
+    partialsTable.onToggleScale = [this] (const xen::ModelPartial& m) {
+        const juce::String id = m.custom ? ids::customPartialInScale (m.index - xen::kSeriesPartials + 1) : ids::partialInScale (m.index + 1);
+        setParam (id, m.inScale ? 0.0 : 1.0);
     };
 
     wireCalculatorEditing();
     buildPages();
     showTab (0);
 
-    setSize (1200, 820);
+    setSize (1200, 880);
     lastTick = juce::Time::getMillisecondCounterHiRes();
     timerCallback();
     startTimerHz (60);
@@ -209,17 +207,21 @@ void SeedEditor::buildPages()
         addAndMakeVisible (*tabButtons[(size_t) t]);
         addChildComponent (pages[(size_t) t]);
     }
-    auto box = [this] (ControlPage& pg, const juce::String& id, const juce::String& label, int intD, int dec, double step, int w = 104) {
+    auto pageOf = [this] (ControlPage& pg) -> juce::StringArray& { return pageIds[(size_t) (&pg - pages.data())]; };
+    auto box = [this, pageOf] (ControlPage& pg, const juce::String& id, const juce::String& label, int intD, int dec, double step, int w = 104) {
+        pageOf (pg).add (id);
         auto c = std::make_unique<pvst::ScrubBox> (p (id), label, intD, dec, step);
         pg.add (*c, w);
         owned.push_back (std::move (c));
     };
-    auto seg = [this] (ControlPage& pg, const juce::String& id, const juce::String& label, juce::StringArray opts, int w) {
+    auto seg = [this, pageOf] (ControlPage& pg, const juce::String& id, const juce::String& label, juce::StringArray opts, int w) {
+        pageOf (pg).add (id);
         auto c = std::make_unique<pvst::SegmentedChoice> (p (id), label, opts);
         pg.add (*c, w);
         owned.push_back (std::move (c));
     };
-    auto choice = [this] (ControlPage& pg, const juce::String& id, const juce::String& label, juce::StringArray opts, int w) {
+    auto choice = [this, pageOf] (ControlPage& pg, const juce::String& id, const juce::String& label, juce::StringArray opts, int w) {
+        pageOf (pg).add (id);
         auto c = std::make_unique<pvst::ChoiceBox> (p (id), label, opts);
         pg.add (*c, w);
         owned.push_back (std::move (c));
@@ -250,6 +252,7 @@ void SeedEditor::buildPages()
     {
         auto c = std::make_unique<pvst::ScrubBox> (p (ids::droneNote), "Drone note", 3, 0, 1.0);
         c->suffix = [] (double n) { return juce::MidiMessage::getMidiNoteName (juce::roundToInt (n), true, true, 4); };
+        pageIds[0].add (ids::droneNote);
         keys.add (*c, 140);
         owned.push_back (std::move (c));
     }
@@ -261,10 +264,11 @@ void SeedEditor::buildPages()
         env.add (*ev, 420, 116);
         owned.push_back (std::move (ev));
     }
-    box (env, ids::attack, "Attack (ms)", 4, 0, 1.0);
-    box (env, ids::decay, "Decay (ms)", 5, 0, 10.0, 112);
+    // 2 decimals of a millisecond, down to 0 ms (user v0.3.1).
+    box (env, ids::attack, "Attack (ms)", 4, 2, 1.0, 124);
+    box (env, ids::decay, "Decay (ms)", 5, 2, 10.0, 134);
     box (env, ids::sustain, "Sustain (%)", 3, 1, 1.0);
-    box (env, ids::release, "Release (ms)", 5, 0, 10.0, 112);
+    box (env, ids::release, "Release (ms)", 5, 2, 10.0, 134);
 
     auto& timbre = pages[2];
     caption (timbre, "ADDITIVE", 96);
@@ -361,7 +365,36 @@ void SeedEditor::timerCallback()
     juce::String footer = juce::String (playable) + " playable" + th::dot() + juce::String (out.millis, 1) + " ms";
     if (out.settings.method == xen::Method::Consonance && ! out.searchComplete) footer << th::dot() << "search stopped early";
     scaleTable.setScale (fin, settings.fundamentalHz, footer);
-    partialsPlot.setPartials (settings.modelPartials(), settings.seed, settings.fundamentalHz);
+    const auto model = settings.modelPartials();
+    partialsPlot.setPartials (model, settings.seed, settings.fundamentalHz);
+    partialsTable.setPartials (model, settings.fundamentalHz);
+
+    // Played notes light up (ArtHar): a held key's note = its pitch folded into one period,
+    // matched to the nearest scale note within 15 cents. Released notes fade (0.18 s half-life).
+    emphasis.resize ((size_t) fin.count, 0.0f);
+    std::vector<bool> lit ((size_t) fin.count, false);
+    const double period = std::max (1.0, fin.period);
+    for (auto& h : proc.uiHeld)
+    {
+        const float c = h.load (std::memory_order_relaxed);
+        if (std::isnan (c)) continue;
+        double pc = std::fmod ((double) c, period);
+        if (pc < 0) pc += period;
+        for (int i = 0; i < fin.count; ++i)
+        {
+            const double nc = fin.notes[(size_t) i].cents;
+            if (std::abs (nc - pc) < 15.0 || (fin.notes[(size_t) i].kind == xen::ScaleNote::Unison && std::abs (period - pc) < 15.0))
+                lit[(size_t) i] = true;
+        }
+    }
+    const float fade = std::pow (0.5f, dt / 0.18f);
+    for (size_t i = 0; i < emphasis.size(); ++i) emphasis[i] = lit[i] ? 1.0f : (emphasis[i] * fade < 0.01f ? 0.0f : emphasis[i] * fade);
+    curvePlot.setEmphasis (emphasis);
+    scaleTable.setEmphasis (emphasis);
+
+    // Only the chosen method's settings are shown (user v0.3.1).
+    const int method = (int) std::lround (p (ids::method).convertFrom0to1 (p (ids::method).getValue()));
+    if (method != shownMethod) { shownMethod = method; layoutCalculatorRow(); }
 
     curvePlot.tick (dt);
     partialsPlot.tick (dt);
@@ -404,45 +437,59 @@ void SeedEditor::resized()
     constexpr int m = 12, gap = 8;
     auto b = getLocalBounds().reduced (m, 0);
     auto header = b.removeFromTop (46).withTrimmedLeft (240).withSizeKeepingCentre (b.getWidth() - 480, 28);
-    header = header.withWidth (520);
+    header = header.withWidth (590);
     prevPreset.setBounds (header.removeFromLeft (28)); header.removeFromLeft (4);
     presetName.setBounds (header.removeFromLeft (220)); header.removeFromLeft (4);
     nextPreset.setBounds (header.removeFromLeft (28)); header.removeFromLeft (10);
     savePreset.setBounds (header.removeFromLeft (100)); header.removeFromLeft (6);
     scopeBtn.setBounds (header.removeFromLeft (110));
+    header.removeFromLeft (6);
+    initAll.setBounds (header.removeFromLeft (60));
 
     calcArea = b.removeFromTop (100);
-    {
-        auto row = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
-        auto place = [&] (juce::Component& c, int w) { c.setBounds (row.removeFromLeft (w)); row.removeFromLeft (14); };
-        place (fundamentalBox, 116);
-        place (seedBox, 134);
-        place (partialsBox, 66);
-        place (rolloffBox, 78);
-        place (methodSeg, 200);
-        place (minDipBox, 90);
-        place (toleranceBox, 98);
-        place (minSharedBox, 80);
-        auto buttons = row.withHeight (28).withY (row.getY() + 19);
-        resetEdits.setBounds (buttons.removeFromLeft (96));
-        buttons.removeFromLeft (8);
-        diceTuning.setBounds (buttons.removeFromLeft (96));
-    }
+    layoutCalculatorRow();
     b.removeFromTop (gap);
     auto middle = b.removeFromTop (430);
-    scaleTable.setBounds (middle.removeFromRight (360));
+    auto right = middle.removeFromRight (360);
     middle.removeFromRight (gap);
     curvePlot.setBounds (middle.removeFromTop (230));
     middle.removeFromTop (gap);
     partialsPlot.setBounds (middle);
+    scaleTable.setBounds (right.removeFromTop (230));
+    right.removeFromTop (gap);
+    partialsTable.setBounds (right);
     b.removeFromTop (gap);
 
     synthArea = b.removeFromTop (b.getHeight() - 10);
     auto inner = synthArea.reduced (10, 6).withTrimmedTop (22);
     auto tabs = inner.removeFromTop (26);
-    for (int t = 0; t < kTabs; ++t) { tabButtons[(size_t) t]->setBounds (tabs.removeFromLeft (124)); tabs.removeFromLeft (4); }
-    diceSound.setBounds (tabs.removeFromRight (100));
-    tabs.removeFromRight (6);
-    mutateBtn.setBounds (tabs.removeFromRight (110));
+    for (int t = 0; t < kTabs; ++t) { tabButtons[(size_t) t]->setBounds (tabs.removeFromLeft (118)); tabs.removeFromLeft (4); }
+    resetPage.setBounds (tabs.removeFromRight (90));
+    tabs.removeFromRight (4);
+    mutatePage.setBounds (tabs.removeFromRight (96));
+    tabs.removeFromRight (4);
+    dicePage.setBounds (tabs.removeFromRight (86));
     for (auto& pg : pages) pg.setBounds (inner);
+}
+
+void SeedEditor::layoutCalculatorRow()
+{
+    const bool consonance = shownMethod == 1;
+    minDipBox.setVisible (! consonance);
+    toleranceBox.setVisible (consonance);
+    minSharedBox.setVisible (consonance);
+    auto row = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
+    auto place = [&] (juce::Component& c, int w) { c.setBounds (row.removeFromLeft (w)); row.removeFromLeft (14); };
+    place (fundamentalBox, 116);
+    place (seedBox, 134);
+    place (partialsBox, 66);
+    place (rolloffBox, 78);
+    place (methodSeg, 200);
+    if (consonance) { place (toleranceBox, 98); place (minSharedBox, 80); }
+    else place (minDipBox, 90);
+    auto buttons = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
+    buttons = buttons.removeFromRight (200).withHeight (28).withY (buttons.getY() + 19);
+    diceTuning.setBounds (buttons.removeFromRight (96));
+    buttons.removeFromRight (8);
+    resetEdits.setBounds (buttons.removeFromRight (96));
 }

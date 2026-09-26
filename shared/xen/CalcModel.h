@@ -33,10 +33,13 @@ inline double dbToGain (double db) { return db <= kMuteDb + 1e-9 ? 0.0 : std::po
 
 struct PartialEdits
 {
+    PartialEdits() { inScale.fill (true); }
     std::array<double, kSeriesPartials> levelDb {};  // 0 = unmodified
     std::array<double, kSeriesPartials> posCents {}; // 0 = unmodified
+    std::array<bool, kSeriesPartials> inScale;       // shapes the scale? (ArtHar v1.15 tick); true = unmodified
     std::array<bool, kCustomPartials> customOn {};
     std::array<double, kCustomPartials> customCents {}, customLevelDb {};
+    std::array<bool, kCustomPartials> customInScale {}; // hand-added partials start "sound only"
 };
 
 struct ModelPartial
@@ -45,6 +48,7 @@ struct ModelPartial
     double amp = 0.0;    // reference loudness (0 = silent: left out of the scale math)
     int index = 0;       // 0..63 series partial (n = index+1), 64..71 custom slot
     bool custom = false, moved = false, levelEdited = false;
+    bool inScale = true; // false = played by the synth but left out of the scale math
 };
 
 /// The calculator's partials after edits. Series first (n = 1..count), then custom ones.
@@ -62,6 +66,7 @@ inline std::vector<ModelPartial> buildPartials (double seed, int count, double r
         p.amp = std::min (4.0, rolloffShape (i + 1, rolloff) * dbToGain (e.levelDb[(size_t) i]));
         p.moved = std::abs (pos) > 1e-9;
         p.levelEdited = std::abs (e.levelDb[(size_t) i]) > 1e-9;
+        p.inScale = i == 0 || e.inScale[(size_t) i]; // the fundamental is always in
         out.push_back (p);
     }
     for (int k = 0; k < kCustomPartials; ++k)
@@ -72,6 +77,7 @@ inline std::vector<ModelPartial> buildPartials (double seed, int count, double r
             p.custom = true;
             p.cents = e.customCents[(size_t) k];
             p.amp = dbToGain (e.customLevelDb[(size_t) k]);
+            p.inScale = e.customInScale[(size_t) k];
             out.push_back (p);
         }
     return out;
@@ -186,3 +192,4 @@ inline FinalScale applyNoteEdits (const RawScale& raw, const NoteEdits& e)
     return f;
 }
 } // namespace xen
+

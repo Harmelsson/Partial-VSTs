@@ -145,7 +145,7 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        if (arrowAt (e.position) != 0) return;
+        if (arrowAt (e.position) != 0 || ! e.mods.isLeftButtonDown()) return;
         editor.setText (juce::String (value(), decimals), false);
         editor.setVisible (true);
         editor.grabKeyboardFocus();

@@ -71,6 +71,7 @@ private:
     void wireCalculatorEditing();
     void buildPages();
     void refreshPresetLabel();
+    void layoutCalculatorRow();
     void savePresetFlow();
 
     SeedProcessor& proc;
@@ -88,13 +89,18 @@ private:
     pvst::CurvePlot curvePlot;
     pvst::PartialsPlot partialsPlot;
     pvst::ScaleTable scaleTable;
+    pvst::PartialsTable partialsTable;
+    std::vector<float> emphasis; // per FinalScale note: lit while played (ArtHar style)
 
     // Synth.
     static constexpr int kTabs = 6;
     std::array<std::unique_ptr<pvst::FlatButton>, kTabs> tabButtons;
     std::array<ControlPage, kTabs> pages;
     int currentTab = 0;
-    pvst::FlatButton mutateBtn { "Mutate sound" }, diceSound { "Dice sound" };
+    // Per page (user v0.3.1: "Dice settings on each page that only affect the page they are on").
+    pvst::FlatButton dicePage { "Dice page" }, mutatePage { "Mutate page" }, resetPage { "Reset page" }, initAll { "Init" };
+    std::array<juce::StringArray, kTabs> pageIds; // which parameters live on each page
+    int shownMethod = -1;
     std::vector<std::unique_ptr<juce::Component>> owned; // controls living on the pages
     std::vector<ModMeter*> meters;
     pvst::EnvelopeView* envelopeView = nullptr;

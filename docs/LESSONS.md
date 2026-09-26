@@ -57,3 +57,7 @@ Format: **topic** — what happened → what to do instead. (date)
   Cause unknown (both started within seconds of each other, right after the workflow first got
   `permissions: contents: write`). If it recurs: check repo Settings → Actions → General →
   Workflow permissions = "Read and write" (user must click it; agent can't).
+- **Double-click events come from ANY mouse button** (2026-09-26): two quick middle-clicks fired
+  mouseDoubleClick and added custom notes. Record the button in mouseDown and only act on left.
+- **User preferences can flip quickly** (2026-09-26): the 12-keys mode was requested and withdrawn
+  within one turn. Build big features in separable pieces so they can be removed cleanly.

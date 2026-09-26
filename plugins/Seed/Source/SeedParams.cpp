@@ -61,6 +61,13 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         add<AudioParameterFloat> (L, ParameterID { ids::customPartialLevel (k), v3 }, "Custom partial " + String (k) + " level",
                                   NormalisableRange<float> (-60.0f, 0.0f, 0.0f), -12.0f, fmt (1, "dB"));
     }
+    // v0.4: which partials shape the SCALE (ArtHar v1.15 tick boxes). Unticked = sound only.
+    // Series partials start ticked, hand-added (custom) ones unticked. The fundamental is always in.
+    const int v4 = 5;
+    for (int n = 2; n <= xen::kSeriesPartials; ++n)
+        add<AudioParameterBool> (L, ParameterID { ids::partialInScale (n), v4 }, "Partial " + String (n) + " in scale", true);
+    for (int k = 1; k <= xen::kCustomPartials; ++k)
+        add<AudioParameterBool> (L, ParameterID { ids::customPartialInScale (k), v4 }, "Custom partial " + String (k) + " in scale", false);
     // Hand edits of the scale: per found degree on/off + offset from its home; custom notes.
     for (int d = 1; d <= xen::kEditableDegrees; ++d)
     {
@@ -76,10 +83,11 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     }
 
     // ======================= SOUND (the Synth) =============================================
-    add<AudioParameterFloat> (L, ParameterID { ids::attack, v1 }, "Attack", skewed (1.0f, 5000.0f, 120.0f), 8.0f, fmt (0, "ms"));
-    add<AudioParameterFloat> (L, ParameterID { ids::decay, v2 }, "Decay", skewed (1.0f, 10000.0f, 500.0f), 600.0f, fmt (0, "ms"));
+    // v0.4: times go down to 0 ms (user: "attack at 0 ms, even if it clips") with 2 decimals.
+    add<AudioParameterFloat> (L, ParameterID { ids::attack, v1 }, "Attack", skewed (0.0f, 5000.0f, 120.0f), 8.0f, fmt (2, "ms"));
+    add<AudioParameterFloat> (L, ParameterID { ids::decay, v2 }, "Decay", skewed (0.0f, 10000.0f, 500.0f), 600.0f, fmt (2, "ms"));
     add<AudioParameterFloat> (L, ParameterID { ids::sustain, v2 }, "Sustain", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 60.0f, fmt (1, "%"));
-    add<AudioParameterFloat> (L, ParameterID { ids::release, v1 }, "Release", skewed (5.0f, 10000.0f, 500.0f), 400.0f, fmt (0, "ms"));
+    add<AudioParameterFloat> (L, ParameterID { ids::release, v1 }, "Release", skewed (0.0f, 10000.0f, 500.0f), 400.0f, fmt (2, "ms"));
     add<AudioParameterFloat> (L, ParameterID { ids::velocity, v2 }, "Velocity sensitivity", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 100.0f, fmt (0, "%"));
     add<AudioParameterFloat> (L, ParameterID { ids::gain, v1 }, "Gain", NormalisableRange<float> (-48.0f, 0.0f, 0.0f), -12.0f, fmt (1, "dB"));
     add<AudioParameterBool> (L, ParameterID { ids::keysFollow, v1 }, "(old) Keys follow seed - unused", false);
@@ -87,7 +95,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterInt> (L, ParameterID { ids::droneNote, v1 }, "Drone note", 24, 96, 48);
 
     // Keys + pitch.
-    add<AudioParameterChoice> (L, ParameterID { ids::keyMode, v3 }, "Key mode", keyModeNames(), 0);
+    add<AudioParameterChoice> (L, ParameterID { ids::keyMode, v3 }, "Key mode", keyModeNames(), 2); // v0.4 default: Scale (user picks keys by switching notes on/off)
     add<AudioParameterFloat> (L, ParameterID { ids::magnet, v3 }, "Magnet", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 100.0f, fmt (0, "%"));
     add<AudioParameterFloat> (L, ParameterID { ids::life, v3 }, "Life", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 0.0f, fmt (0, "%"));
     add<AudioParameterFloat> (L, ParameterID { ids::glide, v3 }, "Glide", skewed (0.0f, 3000.0f, 200.0f), 40.0f, fmt (0, "ms"));

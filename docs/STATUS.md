@@ -2,9 +2,9 @@
 
 _Last updated: 2026-09-26 (session 1)_
 
-## Seed Playground v0.3.1 — built while the user was away
+## Seed v0.4.0 — playground + first round of user feedback (see PLAYGROUND.md "v0.4.0 changes")
 Design, feature list and HOW TO USE: `docs/PLAYGROUND.md`. User's job on return: try it, decide
-what to keep / delete / split into a new synth / change. 59/59 headless checks pass.
+what to keep / delete / split into a new synth / change. 66/66 headless checks pass.
 `SeedTests --bench` measures CPU.
 **Download: Release `build-9` (v0.3.1, green on Windows incl. all 59 tests):**
 https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-9

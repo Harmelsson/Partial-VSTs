@@ -55,7 +55,12 @@ struct Rig
     std::unique_ptr<SeedProcessor> proc = std::make_unique<SeedProcessor>();
     juce::AudioBuffer<float> buf { 2, kBlock };
 
-    Rig() { proc->setPlayConfigDetails (0, 2, kSr, kBlock); proc->prepareToPlay (kSr, kBlock); }
+    Rig()
+    {
+        proc->setPlayConfigDetails (0, 2, kSr, kBlock);
+        proc->prepareToPlay (kSr, kBlock);
+        set (seed::ids::keyMode, 0.0f); // tests assume normal keys unless they choose a mode
+    }
 
     void set (const juce::String& id, float value)
     {
@@ -557,6 +562,69 @@ void testChaosToys()
     check (allFinite (q) && peakOf (q) <= pvst::SafetyStage::kCeiling + 1e-6f, "scramble 100%: finite, under the ceiling");
 }
 
+void testV04()
+{
+    std::cout << "v0.4 (scale ticks, reset edits, 0 ms attack, held notes)" << std::endl;
+    // Custom partials start "sound only": adding one doesn't change the scale until ticked.
+    Rig a;
+    a.settleCalculator();
+    const auto before = a.proc->finalScale();
+    a.set (seed::ids::customPartialCents (1), 1750.0f);
+    a.set (seed::ids::customPartialLevel (1), 0.0f);
+    a.set (seed::ids::customPartialOn (1), 1.0f);
+    a.settleCalculator();
+    const auto soundOnly = a.proc->finalScale();
+    auto sameScale = [] (const xen::FinalScale& x, const xen::FinalScale& y) {
+        if (x.count != y.count) return false;
+        for (int i = 0; i < x.count; ++i) if (std::abs (x.notes[(size_t) i].cents - y.notes[(size_t) i].cents) > 1e-6) return false;
+        return true;
+    };
+    check (sameScale (before, soundOnly), "unticked custom partial: scale unchanged");
+    auto y = tail (a.render (0.8, Rig::noteOn ({ 69 })), 0.4);
+    check (toneAmp (y, 440.0 * std::exp2 (1750.0 / 1200.0)) > 0.01, "...but it sounds");
+    a.set (seed::ids::customPartialInScale (1), 1.0f);
+    a.settleCalculator();
+    check (! sameScale (before, a.proc->finalScale()), "ticked: now it shapes the scale");
+    // Unticking a series partial changes the scale too (partial 3 out of the math).
+    Rig b;
+    b.settleCalculator();
+    const auto b0 = b.proc->finalScale();
+    b.set (seed::ids::partialInScale (3), 0.0f);
+    b.settleCalculator();
+    check (! sameScale (b0, b.proc->finalScale()), "unticking partial 3 changes the scale");
+
+    // Reset edits: hand edits AND calculator-aimed modulators go; synth-aimed ones stay.
+    Rig r;
+    r.set (seed::ids::noteOn (2), 0.0f);
+    r.set (seed::ids::partialLevel (4), -20.0f);
+    r.set (seed::ids::partialInScale (5), 0.0f);
+    r.set (seed::ids::modTarget (1), 1.0f); r.set (seed::ids::modDepth (1), 50.0f);   // -> Seed
+    r.set (seed::ids::modTarget (2), 14.0f); r.set (seed::ids::modDepth (2), 50.0f);  // -> Cutoff
+    r.proc->resetCalculatorEdits();
+    auto v = [&r] (const juce::String& id) { auto* p = r.proc->apvts.getParameter (id); return p->convertFrom0to1 (p->getValue()); };
+    check (v (seed::ids::noteOn (2)) > 0.5f && std::abs (v (seed::ids::partialLevel (4))) < 1e-4f && v (seed::ids::partialInScale (5)) > 0.5f
+               && v (seed::ids::modTarget (1)) < 0.5f && v (seed::ids::modTarget (2)) > 13.5f,
+           "Reset edits: edits + ticks + seed modulator cleared, cutoff modulator kept");
+
+    // 0 ms attack: full level almost at once.
+    Rig z;
+    z.set (seed::ids::attack, 0.0f);
+    auto x = z.render (0.02, Rig::noteOn ({ 69 }, 1.0f));
+    float early = 0.0f; for (int i = 0; i < 48; ++i) early = std::max (early, std::abs (x[(size_t) i]));
+    check (early > 0.05f, "attack 0 ms: loud within the first millisecond", juce::String (early, 3));
+
+    // Held notes are reported for the UI (Scale mode: key 60 + 2 = scale note 2).
+    Rig h;
+    h.set (seed::ids::keyMode, 2.0f);
+    h.settleCalculator();
+    h.render (0.1, Rig::noteOn ({ 62 }));
+    const auto fin = h.proc->finalScale();
+    std::array<double, 80> c {}, st {};
+    fin.playable (c.data(), st.data(), 80);
+    const float held = h.proc->uiHeld[0].load();
+    check (! std::isnan (held) && std::abs (held - (float) c[2]) < 0.01f, "held key 62 reported as scale note 2", juce::String (held, 2));
+}
+
 void testPresets()
 {
     std::cout << "presets" << std::endl;
@@ -596,6 +664,21 @@ void snapshot (const juce::File& file)
     setp (seed::ids::partialLevel (3), -12.0f);
     setp (seed::ids::customPartialCents (1), 2100.0f); setp (seed::ids::customPartialOn (1), 1.0f);
     if (auto* tab = std::getenv ("SEED_TAB")) juce::ignoreUnused (tab);
+    // Hold a note (Scale mode, key 64 = scale note 4) so the played-note highlight shows.
+    setp (seed::ids::keyMode, 2.0f);
+    proc.setPlayConfigDetails (0, 2, kSr, kBlock);
+    proc.prepareToPlay (kSr, kBlock);
+    {
+        juce::AudioBuffer<float> buf (2, kBlock);
+        for (int i = 0; i < 40; ++i)
+        {
+            juce::MidiBuffer m;
+            if (i == 20) m.addEvent (juce::MidiMessage::noteOn (1, 64, 0.8f), 0);
+            proc.pumpCalculator();
+            proc.processBlock (buf, m);
+            juce::Thread::sleep (5);
+        }
+    }
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
     if (auto* tab = std::getenv ("SEED_TAB")) static_cast<SeedEditor*> (ed.get())->showTab (juce::String (tab).getIntValue());
     juce::MessageManager::getInstance()->runDispatchLoopUntil (900); // calculator + animations settle
@@ -653,6 +736,7 @@ int main (int argc, char** argv)
     testChaosSafety();
     testPresets();
     testChaosToys();
+    testV04();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")
             snapshot (juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]));

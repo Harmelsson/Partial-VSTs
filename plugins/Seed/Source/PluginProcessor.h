@@ -56,6 +56,7 @@ public:
     /// The latest scale with the note edits applied (what the keyboard plays).
     xen::FinalScale finalScale() const;
     xen::NoteEdits noteEditsFromParams() const;
+
     xen::PartialEdits partialEditsFromParams() const;
 
     // ---- Presets (message thread) -----------------------------------------------------------
@@ -69,10 +70,21 @@ public:
     // ---- Chaos (message thread) ---------------------------------------------------------------
     /// amount 1 = Dice (fully random), < 1 = Mutate (nudge). Scope chooses the group.
     void randomize (Scope scope, double amount);
+    /// Dice / Mutate only these parameters (one synth page).
+    void randomizeParams (const juce::StringArray& ids, double amount);
+    /// Back to defaults: these parameters only (one synth page).
+    void resetParams (const juce::StringArray& ids);
+    /// Calculator back to what it calculates: every hand edit, Scale tick, key-map choice, and
+    /// every modulator aimed at a calculator value is removed. The core settings stay.
+    void resetCalculatorEdits();
+    /// Everything back to defaults (a fresh Seed).
+    void initAll();
 
     // ---- For the UI -----------------------------------------------------------------------------
     std::atomic<int> uiActiveVoices { 0 };
     std::array<std::atomic<float>, seed::kNumMods> uiModValue {};
+    /// Held notes (cents above the Fundamental), NaN = empty slot. Written by the audio thread.
+    std::array<std::atomic<float>, seed::kMaxVoices> uiHeld {};
     int safetyFaults() const { return safety.faultCount(); }
 
 private:
@@ -113,6 +125,9 @@ private:
     std::array<juce::RangedAudioParameter*, xen::kCustomPartials> cpOn {}, cpC {}, cpL {};
     std::array<juce::RangedAudioParameter*, xen::kEditableDegrees> nOn {}, nOff {};
     std::array<juce::RangedAudioParameter*, xen::kCustomNotes> cnOn {}, cnC {};
+    std::array<juce::RangedAudioParameter*, xen::kSeriesPartials> pScl {};
+    std::array<juce::RangedAudioParameter*, xen::kCustomPartials> cpScl {};
+    void randomizeOne (juce::RangedAudioParameter& p, double amount, juce::Random& r);
     std::array<juce::RangedAudioParameter*, seed::kNumMods> mShape {}, mRate {}, mDepth {}, mTarget {};
     std::vector<juce::RangedAudioParameter*> targetParams; // index = mod target
 

@@ -152,3 +152,26 @@ drives the limiter hard (safe, but loud) — levels may want taming after the us
   Timbre tab relaid into two rows (first version overflowed the page). 59/59 checks.
 - 09:05 check-in: CI run #9 (Seed v0.3.1) green on Windows incl. all 59 tests; Release `build-9`
   published (run #8 for v0.3.0 was cancelled by the newer push, as designed).
+
+## 2026-09-26 — session 1 — user tested v0.3.1 (build 9) → v0.4 requests
+**User:** "pretty decent for a first try". Questions: what are Seed-12, Magnet, Bend range, Chord
+size/step, Mutate? Feedback:
+- notes on the curve barely visible;
+- MIDI: only 11 differentiated keys (12 with the next octave) of the usable scale, so a 20-note
+  scale doesn't mean relearning the piano — and those 12 keys must be SELECTABLE;
+- attack must go to 0 ms (even if it clicks); envelope times with 2 decimals of ms;
+- dissonance/consonance settings should only show for the selected method;
+- middle-click in empty space on the note plot sometimes creates a custom note (bug);
+- custom partials like ArtHar (v1.15): tick boxes; they affect the calculation only when ticked;
+- likes Dice sound/tuning, but wants "Dice settings" per page affecting only that page.
+Read ArtHar v1.16 (83e50a9) partial tick feature with the user's permission.
+**Mid-turn additions from user:** "Reset edits doesn't reset everything, the modulators stay";
+"I'd like a visual representation of which note I'm pressing (see ArtHar)"; and "I'd like to revoke
+my 12 key thing, I can do it manually by disabling and enabling notes. Sorry :D".
+**Done (v0.4.0):** 12-keys mode built then removed again (default key mode = Scale instead);
+played-note emphasis (ArtHar-style, engine reports held keys' note cents → UI matches within
+15 c, 0.18 s fade); notes drawn much more visibly; env times 0 ms + 2 decimals (0 ms stage = one
+sample); method-specific boxes; middle double-click bug fixed (left-only double-click adds);
+Scale tick params p{n}scl / cp{k}scl + PartialsTable; per-page Dice/Mutate/Reset + Init; Reset
+edits clears ticks + calculator-aimed mods. Window 1200×880. 66/66 checks.
+**Answered in chat:** Seed-12, Magnet, Bend range, Chord size/step, Mutate.

@@ -17,8 +17,10 @@ SeedProcessor::SeedProcessor()
         pLvl[(size_t) n - 1] = apvts.getParameter (ids::partialLevel (n));
         pPos[(size_t) n - 1] = n >= 2 ? apvts.getParameter (ids::partialPos (n)) : nullptr;
     }
+    for (int n = 2; n <= xen::kSeriesPartials; ++n) pScl[(size_t) n - 1] = apvts.getParameter (ids::partialInScale (n));
     for (int k = 1; k <= xen::kCustomPartials; ++k)
     {
+        cpScl[(size_t) k - 1] = apvts.getParameter (ids::customPartialInScale (k));
         cpOn[(size_t) k - 1] = apvts.getParameter (ids::customPartialOn (k));
         cpC[(size_t) k - 1] = apvts.getParameter (ids::customPartialCents (k));
         cpL[(size_t) k - 1] = apvts.getParameter (ids::customPartialLevel (k));
@@ -45,6 +47,7 @@ SeedProcessor::SeedProcessor()
         targetParams.push_back (juce::String (id).isEmpty() ? nullptr : apvts.getParameter (id));
     jassert ((int) targetParams.size() == T_Count);
     modOffset.assign ((size_t) T_Count, 0.0);
+    for (auto& h : uiHeld) h.store (std::nanf (""));
 
     pumpCalculator();
     startTimerHz (30);
@@ -135,12 +138,14 @@ xen::PartialEdits SeedProcessor::partialEditsFromParams() const
     {
         e.levelDb[(size_t) i] = val (pLvl[(size_t) i]);
         e.posCents[(size_t) i] = pPos[(size_t) i] ? val (pPos[(size_t) i]) : 0.0;
+        e.inScale[(size_t) i] = pScl[(size_t) i] == nullptr || pScl[(size_t) i]->getValue() > 0.5f;
     }
     for (int k = 0; k < xen::kCustomPartials; ++k)
     {
         e.customOn[(size_t) k] = cpOn[(size_t) k]->getValue() > 0.5f;
         e.customCents[(size_t) k] = val (cpC[(size_t) k]);
         e.customLevelDb[(size_t) k] = val (cpL[(size_t) k]);
+        e.customInScale[(size_t) k] = cpScl[(size_t) k]->getValue() > 0.5f;
     }
     return e;
 }
@@ -264,6 +269,9 @@ void SeedProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     if (buffer.getNumChannels() > 1) buffer.copyFrom (1, 0, dryR.data(), n);
     safety.process (buffer); // always last, never bypassed
     uiActiveVoices.store (engine.activeVoiceCount(), std::memory_order_relaxed);
+    std::array<float, kMaxVoices> held {};
+    const int nh = engine.heldNoteCents (held.data(), kMaxVoices);
+    for (int i = 0; i < kMaxVoices; ++i) uiHeld[(size_t) i].store (i < nh ? held[(size_t) i] : std::nanf (""), std::memory_order_relaxed);
 }
 
 // ================================================================================================
@@ -362,41 +370,94 @@ bool SeedProcessor::loadPreset (const juce::File& file, Scope scope)
     return true;
 }
 
-void SeedProcessor::randomize (Scope scope, double amount)
+void SeedProcessor::randomizeOne (juce::RangedAudioParameter& rp, double amount, juce::Random& r)
 {
-    // Never randomised: output gain (hearing!), drone, legacy, per-item edits (those are the
-    // user's hand work), custom slots, bend range.
+    const auto id = rp.getParameterID();
+    const float cur = rp.getValue();
+    float next = cur + (float) amount * (r.nextFloat() - cur);
+    if (rp.getNumSteps() < 30 && amount < 1.0 && r.nextFloat() > amount * 0.5) next = cur; // choices change rarely
+    // Keep a few things sane: noise mostly off, feedback not pinned at max, some partials.
+    if (id == ids::noise) next = std::min (next, rp.convertTo0to1 (-18.0f));
+    if (id == ids::delayFb) next = std::min (next, rp.convertTo0to1 (85.0f));
+    if (id == ids::partials) next = std::max (next, rp.convertTo0to1 (4.0f));
+    rp.setValueNotifyingHost (next);
+}
+
+/// Never randomised: output gain (hearing!), drone, legacy, bend range, velocity, fundamental.
+static bool neverRandomised (const juce::String& id)
+{
     static const juce::StringArray never { ids::gain, ids::drone, ids::droneNote, ids::keysFollow, ids::bendRange,
                                            ids::velocity, ids::fundamental };
+    return never.contains (id);
+}
+
+/// Per-item calculator edits (partials, notes, ticks, key map) are the user's hand work.
+static bool isPerItem (const juce::String& id)
+{
+    return id.startsWith ("cp") || id.startsWith ("cn") || (id.startsWith ("n") && id != ids::noise)
+        || (id.startsWith ("p") && (id.endsWith ("lvl") || id.endsWith ("pos") || id.endsWith ("scl")));
+}
+
+void SeedProcessor::randomize (Scope scope, double amount)
+{
     juce::Random r;
     for (auto* p : getParameters())
     {
         auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p);
         if (rp == nullptr) continue;
         const auto id = rp->getParameterID();
-        if (never.contains (id)) continue;
+        if (neverRandomised (id)) continue;
         const bool tuning = isTuningParam (id);
         if (scope == Scope::Tuning && ! tuning) continue;
         if (scope == Scope::Sound && tuning) continue;
-        // Per-partial / per-note edits and custom slots: leave alone except a light sprinkle of
-        // partial level edits when dicing the tuning fully.
-        const bool perItem = id.startsWith ("cp") || id.startsWith ("cn") || (id.startsWith ("n") && id != ids::noise)
-                          || ((id.startsWith ("p") && (id.endsWith ("lvl") || id.endsWith ("pos"))));
-        if (perItem)
+        if (isPerItem (id))
         {
-            if (amount >= 1.0 && id.endsWith ("lvl") && id.startsWith ("p") && r.nextFloat() < 0.15f)
+            // A light sprinkle of partial level edits when dicing the tuning fully.
+            if (amount >= 1.0 && id.startsWith ("p") && id.endsWith ("lvl") && r.nextFloat() < 0.15f)
                 rp->setValueNotifyingHost (rp->convertTo0to1 ((float) (r.nextFloat() * -30.0)));
             continue;
         }
-        const float cur = rp->getValue();
-        float next = cur + (float) amount * (r.nextFloat() - cur);
-        if (rp->getNumSteps() < 30 && amount < 1.0 && r.nextFloat() > amount * 0.5) next = cur; // choices change rarely
-        // Keep a few things sane: noise mostly off, feedback not pinned at max.
-        if (id == ids::noise) next = std::min (next, rp->convertTo0to1 (-18.0f));
-        if (id == ids::delayFb) next = std::min (next, rp->convertTo0to1 (85.0f));
-        if (id == ids::partials) next = std::max (next, rp->convertTo0to1 (4.0f));
-        rp->setValueNotifyingHost (next);
+        randomizeOne (*rp, amount, r);
     }
+}
+
+void SeedProcessor::randomizeParams (const juce::StringArray& idList, double amount)
+{
+    juce::Random r;
+    for (auto& id : idList)
+        if (auto* rp = apvts.getParameter (id); rp != nullptr && ! neverRandomised (id))
+            randomizeOne (*rp, amount, r);
+}
+
+void SeedProcessor::resetParams (const juce::StringArray& idList)
+{
+    for (auto& id : idList)
+        if (auto* rp = apvts.getParameter (id)) rp->setValueNotifyingHost (rp->getDefaultValue());
+}
+
+void SeedProcessor::resetCalculatorEdits()
+{
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+            if (isTuningParam (rp->getParameterID()) && isPerItem (rp->getParameterID()))
+                rp->setValueNotifyingHost (rp->getDefaultValue());
+    // Modulators aimed at calculator values also "modify the calculator": remove those links.
+    for (int m = 0; m < kNumMods; ++m)
+    {
+        const int tgt = (int) mTarget[(size_t) m]->convertFrom0to1 (mTarget[(size_t) m]->getValue());
+        if (tgt == T_Seed || tgt == T_Fund || tgt == T_Rolloff || tgt == T_MinDip)
+        {
+            mTarget[(size_t) m]->setValueNotifyingHost (mTarget[(size_t) m]->getDefaultValue());
+            mDepth[(size_t) m]->setValueNotifyingHost (mDepth[(size_t) m]->getDefaultValue());
+        }
+    }
+}
+
+void SeedProcessor::initAll()
+{
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p)) rp->setValueNotifyingHost (rp->getDefaultValue());
+    currentPresetName = {};
 }
 
 // ================================================================================================

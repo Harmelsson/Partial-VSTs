@@ -39,9 +39,9 @@ struct CalculatorSettings
                && minShared == o.minShared))
             return false;
         for (size_t i = 0; i < edits.levelDb.size(); ++i)
-            if (! eq (edits.levelDb[i], o.edits.levelDb[i]) || ! eq (edits.posCents[i], o.edits.posCents[i])) return false;
+            if (! eq (edits.levelDb[i], o.edits.levelDb[i]) || ! eq (edits.posCents[i], o.edits.posCents[i]) || edits.inScale[i] != o.edits.inScale[i]) return false;
         for (size_t k = 0; k < edits.customOn.size(); ++k)
-            if (edits.customOn[k] != o.edits.customOn[k] || ! eq (edits.customCents[k], o.edits.customCents[k])
+            if (edits.customOn[k] != o.edits.customOn[k] || edits.customInScale[k] != o.edits.customInScale[k] || ! eq (edits.customCents[k], o.edits.customCents[k])
                 || ! eq (edits.customLevelDb[k], o.edits.customLevelDb[k]))
                 return false;
         return true;
@@ -51,12 +51,13 @@ struct CalculatorSettings
     /// The partials after edits (for display and for the synth).
     std::vector<ModelPartial> modelPartials() const { return buildPartials (seed, partials, rolloff, edits); }
 
-    /// The sounding partials as (Hz, loudness) — silent ones are left out, like ArtHar.
+    /// The partials that SHAPE THE SCALE as (Hz, loudness): silent ones and unticked ("sound
+    /// only") ones are left out, like ArtHar.
     std::vector<SinePartial> makePartials() const
     {
         std::vector<SinePartial> p;
         for (auto& m : modelPartials())
-            if (m.amp > 0.0) p.push_back ({ fundamentalHz * centsToRatio (m.cents), std::min (1.0, m.amp) });
+            if (m.amp > 0.0 && m.inScale) p.push_back ({ fundamentalHz * centsToRatio (m.cents), std::min (1.0, m.amp) });
         return p;
     }
 };
@@ -129,7 +130,7 @@ private:
             {
                 std::vector<double> positions;
                 for (auto& m : job.modelPartials())
-                    if (m.amp > 0.0) positions.push_back (m.cents);
+                    if (m.amp > 0.0 && m.inScale) positions.push_back (m.cents);
                 ConsonanceSettings cs;
                 cs.toleranceCents = job.toleranceCents;
                 cs.minShared = job.minShared;

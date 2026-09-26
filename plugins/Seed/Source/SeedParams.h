@@ -15,7 +15,7 @@
 
 namespace seed
 {
-inline constexpr const char* kVersion = "0.3.1";
+inline constexpr const char* kVersion = "0.4.0";
 
 namespace ids
 {
@@ -90,6 +90,8 @@ namespace ids
     inline juce::String noteOffset (int d) { return "n" + juce::String (d) + "off"; }
     inline juce::String customNoteOn (int k) { return "cn" + juce::String (k) + "on"; }    // k = 1..8
     inline juce::String customNoteCents (int k) { return "cn" + juce::String (k) + "c"; }
+    inline juce::String partialInScale (int n) { return "p" + juce::String (n) + "scl"; }       // n = 2..64 (v0.4)
+    inline juce::String customPartialInScale (int k) { return "cp" + juce::String (k) + "scl"; } // k = 1..8 (v0.4)
     inline juce::String modShape (int m) { return "mod" + juce::String (m) + "shape"; }    // m = 1..4
     inline juce::String modRate (int m) { return "mod" + juce::String (m) + "rate"; }
     inline juce::String modDepth (int m) { return "mod" + juce::String (m) + "depth"; }
@@ -147,6 +149,7 @@ inline bool isTuningParam (const juce::String& id)
     static const juce::StringArray core { ids::seed, ids::partials, ids::rolloff, ids::fundamental, ids::minDip,
                                           ids::method, ids::tolerance, ids::minShared };
     if (core.contains (id)) return true;
+    if (id.startsWith ("p") && id.endsWith ("scl")) return id.substring (1, id.length() - 3).containsOnly ("0123456789");
     // Generated edit IDs: p{n}lvl, p{n}pos, cp{k}*, n{d}on/off, cn{k}*.
     auto isDigits = [] (const juce::String& s) { return s.isNotEmpty() && s.containsOnly ("0123456789"); };
     if (id.startsWith ("cp") || id.startsWith ("cn")) return isDigits (id.substring (2).retainCharacters ("0123456789").substring (0, 1));

@@ -134,6 +134,16 @@ public:
         return c;
     }
 
+    /// Held notes for the UI: each held voice's key pitch in cents above the Fundamental (before
+    /// pitch shift / bend), so the UI can light up the scale note being played. Returns count.
+    int heldNoteCents (float* out, int maxOut) const
+    {
+        int n = 0;
+        for (auto& v : voices)
+            if (v.active && v.stage != Voice::Release && n < maxOut) out[n++] = (float) v.keyRelCents;
+        return n;
+    }
+
     /// Current pitch (cents from middle C) of the first sounding voice, for the UI (or NaN).
     double firstVoiceCents() const
     {
@@ -171,6 +181,7 @@ private:
         Stage stage = Attack;
         uint64_t age = 0;
         double cents = 0.0; // current (glided) pitch, cents from middle C
+        double keyRelCents = 0.0; // the key's note, cents above the Fundamental (for the UI)
         int numActive = 0;
         uint32_t rng = 12345u;
         float fg = 0.1f, fk = 1.4f, fa1 = 0, fa2 = 0, fa3 = 0; // SVF coefficients
@@ -323,9 +334,10 @@ private:
         const double fadeTop = 0.45 * sr, fadeBottom = 0.40 * sr;
 
         masterGain = (float) std::pow (10.0, s.gainDb / 20.0);
+        // Times may be 0 ms (user request): then the stage lasts one sample (a click is accepted).
         attackStep = (float) (1.0 / std::max (1.0, s.attackMs * 0.001 * sr));
-        decayCoef = (float) std::exp (std::log (0.001) / std::max (1.0, s.decayMs * 0.001 * sr));
-        releaseCoef = (float) std::exp (std::log (0.001) / std::max (1.0, s.releaseMs * 0.001 * sr));
+        decayCoef = s.decayMs <= 0.0 ? 0.0f : (float) std::exp (std::log (0.001) / std::max (1.0, s.decayMs * 0.001 * sr));
+        releaseCoef = s.releaseMs <= 0.0 ? 0.0f : (float) std::exp (std::log (0.001) / std::max (1.0, s.releaseMs * 0.001 * sr));
         sustainLevel = (float) std::clamp (s.sustain, 0.0, 1.0);
         const double glideCoef = s.glideMs <= 0.5 ? 0.0 : std::exp (-tickSec / (s.glideMs * 0.001));
         const float fenvCoef = (float) std::exp (-tickSec / std::max (0.001, s.filterDecayMs * 0.001));
@@ -396,6 +408,7 @@ private:
             if (! v.active) continue;
             double keyCents, strength;
             keyTarget (v.note, keyCents, strength);
+            v.keyRelCents = keyCents - 1200.0 * std::log2 (s.fundamentalHz / kC4);
             const double targetCents = keyCents + s.pitchCents + s.bendCents;
             v.cents = (v.fresh || glideCoef <= 0.0) ? targetCents : targetCents + (v.cents - targetCents) * glideCoef;
             const double f0 = kC4 * std::exp2 (v.cents / 1200.0);

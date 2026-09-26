@@ -199,3 +199,9 @@ Mod depth 3 decimals. Mod targets re-pointed to rack params (+ picks). Old sendA
 removed (only in the user's test projects). 76/76 checks.
 **Failure along the way:** a python replace that cut the old FX block also deleted the chaos-toys
 params sitting after it → test crash (null param). Restored from git. Lesson added.
+
+## Seed v0.5 WIP — Scala module (shared/xen/Scala.h)
+- parseScl / writeScl / writeKbm + fitSeedToScale ("which seed makes these notes sit in dissonance valleys").
+- Fit measure attempts: (1) note roughness vs timbre average → 12-EDO fitted seed 3.5 (wrong, FAILED);
+  (2) valley depth at ±15/±35 c → 12-EDO 2.96 (still wrong, FAILED); (3) valley depth with the PERIOD
+  weighted ×4 → 12-EDO 2.0000, Bohlen-Pierce 13 → 3.0000, JI major → 2.0000 (works). ~80 ms per fit.

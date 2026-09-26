@@ -8,12 +8,18 @@ partial-based ideas — and generally *weird*, unconventional sound tools.
 - **Weird is the default.** The user explicitly does not want yet-another-conventional plugin
   (there are 1000s). Favor strange, exploratory, "what happens if…" behavior. Simple tools are fine
   when asked for or when they serve as building blocks.
-- **ArtHar is a separate project** (standalone Rust app, repo `Harmelsson/arthar`, built to v1.0
-  by other sessions and still changing). Its **Calculator** is the math foundation these plugins
-  build on — see `docs/ARTHAR_REFERENCE.md` (what it does, how to attach it read-only, and the
-  decision to port its math to C++ with the Rust crate as test oracle). **Never push to arthar.**
-  In this repo, `xenharmonic_software_notes.md` / `questions.md` are old ArtHar planning docs —
-  math reference only; their tech/UI/design decisions don't apply. `Concepts/` = ArtHar art; ignore.
+- **ArtHar is a completely separate project** (standalone Rust app, `Harmelsson/arthar`). It will
+  never host VSTs; it runs its own in-house plugins. The two share *idea origins* and often
+  *mechanism logic* — never code, never integration. If the user wants something to exist in both,
+  they will ask for a full rewrite/rethink for that system, not a bridge.
+  **Only read the arthar repo when the user explicitly points you at something there** (e.g. "port
+  plugin X from ArtHar"). Math already copied from it is summarized in `docs/ARTHAR_REFERENCE.md`.
+  Never push to arthar. `xenharmonic_software_notes.md` / `questions.md` in this repo are old ArtHar
+  planning docs (math reference only). `Concepts/` = ArtHar art; ignore.
+- **Everything is dynamic (user's core concept rule).** Any parameter change must be heard live,
+  including on notes that are already held — e.g. changing the seed while holding a note glides
+  that note's partials (and pitch, if the keyboard follows the seed) in real time. No "change takes
+  effect on next note". Design every plugin around smooth, click-free live changes.
 
 ---
 

@@ -1,7 +1,8 @@
 # ArtHar Calculator — how this project uses it
 
-**Repo:** `Harmelsson/arthar` (private, Rust). Separate project, actively developed by *other*
-Claude sessions. **Read-only from here — never push to it.**
+**Repo:** `Harmelsson/arthar` (private, Rust). Completely separate project, developed by *other*
+Claude sessions. ArtHar never runs VSTs; these VSTs never link ArtHar code. Shared: ideas and
+mechanism logic only. **Read it only when the user points at something specific there. Never push.**
 Attach it in a session with the `add_repo` tool (owner `Harmelsson`, repo `arthar`, access read),
 clone to `/home/user/arthar`. Its `ARCHITECTURE.md`, `GLOSSARY.md` and `crates/calculator/src/`
 are the authoritative reference.
@@ -29,14 +30,10 @@ Pure math crate `crates/calculator` (no sound, no deps). Inputs → partials + s
   precision, out-of-range values kept (dimmed, not hidden), edits stored relative to computed
   values.
 
-## Integration decision (2026-09-26, reversible)
-**Port the needed math to C++ (`shared/xen/`), using the Rust crate as the test oracle.**
-- Why not link the Rust crate into the plugins (FFI/staticlib)? The arthar repo is private and
-  changing under another session → CI would need cross-repo credentials, and every arthar change
-  could break plugin builds. Plugins mostly need tiny pieces (stretch = one line, rolloff, the
-  roughness formula), and the heavy searches must run off the audio thread anyway.
-- Guardrail against drift: a check in `tools/` compares C++ results with the Rust calculator's
-  output for a spread of settings (run in-session; the container needs `rustup update` to get
-  rustc ≥ 1.95 first — found 1.94.1 on 2026-09-26).
-- Port incrementally: stretch + rolloff first; dissonance curve when a plugin needs it;
-  consonance search later.
+## Relationship decision (user, 2026-09-26 — final)
+- No code sharing, no FFI, no bridge. Plugins get their **own C++ copy** of whatever math they
+  need (`shared/xen/`), written for real-time use. Each copied file notes the arthar commit it was
+  copied from, so a later session can compare if the user asks.
+- The copy may diverge freely when a plugin needs something different — it is not a mirror.
+- Verification: C++ tests pin the same known values arthar's tests pin (seed 2 = plain harmonics,
+  seed 2.5 partial 2 = 1586.3137 c, seed 3 = 1901.955 c, harmonic dissonance dips at 3/2, 4/3…).

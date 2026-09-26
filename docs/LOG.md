@@ -42,3 +42,14 @@ crate as a test oracle — not FFI-linking. Reasons in ARTHAR_REFERENCE.md.
 1.95. Fix when needed: `rustup update`.
 
 **Next:** user answers: first plugin, merge policy, artifact download, and OK on port-to-C++.
+
+## 2026-09-26 — session 1 — relationship clarified, Seed chosen
+**User:** ArtHar and the VSTs are *completely different things*: ArtHar will never run VSTs; the
+link is shared idea-origins and overlapping mechanism logic, nothing else. If something should
+exist in both, the user asks for a total rewrite for that system. Arthar files are for reference
+only, read only when the user points at a plugin there. "Copy what you can, that's the first step."
+**User on Seed:** loves it. Core concept rule: *everything is dynamic* — changing the seed while
+holding a note must be heard live; since notes' positions change, notes may be created/terminated
+while playing → wants ideas for that problem. Seed is a synth → smoother, less intimidating UI,
+gentler scrubbing/scrolling.
+**Done:** CLAUDE.md + ARTHAR_REFERENCE.md rewritten to match (no oracle/linking, dynamic rule).

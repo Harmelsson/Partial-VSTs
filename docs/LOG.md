@@ -80,3 +80,18 @@ TESTING.md rewritten accordingly. Windows CI run #1: configure OK (4.5 min), bui
 - Tried to download the artifact to send it directly: blocked by the container's proxy.
 - User asked whether the agent could build Windows itself faster → no (Linux container,
   cross-compile untestable). Instead: docs-only pushes skip CI, superseded runs are cancelled.
+
+## 2026-09-26 — session 1 — user tested v0.1 → v0.2 requests
+**User feedback (build #2):** "holy moly, really nice for a first build!!!" but "looks kinda shit" →
+redesign in ArtHar's dark style (sent an ArtHar v1.0 screenshot: near-black, off-white, thin frames,
+letter-spaced caps section titles, number boxes with arrows, square-dot plots, scale table right).
+Requests: velocity-dependent note volume; decay + sustain with an envelope in ArtHar style; the
+dissonance-curve calculator on top. Vision: every synth gets the same/similar calculator on top;
+calculator decides where notes/partials go; per synth some rules stay default, some modifiable,
+some heavily modified. Synths will serve different purposes (plucks, drums, bells, whack sound
+design). Seed = exploration for now.
+**Plan v0.2.0:** C++ copy of dissonance.rs (curve, dips, strength, golden-section refine) in a
+background worker; ArtHar-style shared UI kit (two-colour theme, per-digit ScrubBox, segmented
+toggles, square lattice plots with easing + afterglow, scale table); ADSR + velocity sensitivity;
+Fundamental + Min dip strength params. Keyboard does NOT play the found scale yet (that's the
+note-life work, next).

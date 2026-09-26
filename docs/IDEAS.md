@@ -5,7 +5,7 @@ Weirdness: 🟢 mostly conventional · 🟡 odd · 🔴 genuinely strange.
 Risk = how likely the DSP is to be hard / unstable / need many iterations.
 User: add ideas anywhere, any format — the agent will tidy them.
 
-Core math shared by many ideas (from the ArtHar notes):
+Core math shared by many ideas (from the ArtHar Calculator, see ARTHAR_REFERENCE.md):
 stretched partials `f_n = f0 · n^S`, with `S = log2(seed)` (seed 2.0 = normal harmonics);
 arithmetic partials `F, M·F, (2M−1)·F, …`; Sethares roughness/dissonance curve;
 cross-note consonance `R ≈ (m/n)^S`.
@@ -16,7 +16,7 @@ cross-note consonance `R ≈ (m/n)^S`.
 
 | # | Name (working) | What it does | Weird | Risk | Status |
 |---|---|---|---|---|---|
-| I1 | **Seed** | Additive synth, partials at `n^log2(seed)`. Seed knob, partial count, rolloff, drone mode, per-partial mute. The baseline instrument; seed 2.0 must sound like a plain saw-ish tone (built-in ear check). | 🟡 | low | idea — **recommended first** |
+| I1 | **Seed** | The ArtHar Calculator made playable: additive synth, partials at `n^log2(seed)`, rolloff, drone mode, per-partial mute. Later: keyboard mapped to the calculator's found scale (dissonance-curve dips) instead of 12-EDO. Seed 2.0 must sound like a plain saw-ish tone (built-in ear check). | 🟡 | low | idea — **recommended first** |
 | I2 | **Bellmaker** | Arithmetic partial series (`F, M·F, (2M−1)·F…`) — every register sounds different, bell/metallophone-like. | 🟡 | low | idea |
 | I3 | **Chameleon** | Timbre bends to the chord: when you hold several notes, each voice's partials drift toward positions that make them consonant with the *other* held notes (Sethares in real time). Any chord "resolves" by changing timbre, not pitch. | 🔴 | med | idea |
 | I4 | **Magnets** | The opposite: held notes' *pitches* glide toward nearby roughness minima relative to each other — chords settle into place by themselves, like the dancing XP squares. | 🔴 | med | idea |

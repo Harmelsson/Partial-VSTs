@@ -23,3 +23,22 @@ plugins. Sessions may end without warning → document after every task.
 - ArtHar docs kept as math reference only; their tech/design decisions don't apply.
 
 **Next:** user picks first plugin (Seed vs Stretch Resonator) → Task 0 pipeline + that plugin.
+
+## 2026-09-26 — session 1 — ArtHar calculator discovered & reviewed
+**Context:** User revealed the ArtHar calculator already exists (Rust, v1.0, "advanced and usable",
+no sound) and should be the base. It lives in private repo `Harmelsson/arthar`, which another
+cloud session is modifying right now.
+
+**Done:**
+- Attached `Harmelsson/arthar` read-only, cloned snapshot `8bf556f`, read ARCHITECTURE, GLOSSARY,
+  PROJECT_LOG and the calculator's stretch/loudness/dissonance/scale code.
+- Wrote `docs/ARTHAR_REFERENCE.md` (summary + how to attach + integration decision).
+- Updated CLAUDE.md and IDEAS (Seed = the calculator made playable).
+
+**Decision (reversible, flagged to user):** port needed math to C++ in `shared/xen/`, use the Rust
+crate as a test oracle — not FFI-linking. Reasons in ARTHAR_REFERENCE.md.
+
+**Failed / blocked:** `cargo test` on arthar here fails — container has rustc 1.94.1, arthar needs
+1.95. Fix when needed: `rustup update`.
+
+**Next:** user answers: first plugin, merge policy, artifact download, and OK on port-to-C++.

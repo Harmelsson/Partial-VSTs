@@ -8,10 +8,12 @@ partial-based ideas — and generally *weird*, unconventional sound tools.
 - **Weird is the default.** The user explicitly does not want yet-another-conventional plugin
   (there are 1000s). Favor strange, exploratory, "what happens if…" behavior. Simple tools are fine
   when asked for or when they serve as building blocks.
-- **ArtHar is a separate project.** `xenharmonic_software_notes.md` and `questions.md` are ArtHar
-  (standalone Rust app) docs. Use them only as **domain/math reference** (stretched partials,
-  Sethares dissonance, cross-note consonance, etc.). Their tech decisions (Rust, "never a VST"),
-  UI/concept-art/design choices do **not** apply here. `Concepts/` = ArtHar art; ignore.
+- **ArtHar is a separate project** (standalone Rust app, repo `Harmelsson/arthar`, built to v1.0
+  by other sessions and still changing). Its **Calculator** is the math foundation these plugins
+  build on — see `docs/ARTHAR_REFERENCE.md` (what it does, how to attach it read-only, and the
+  decision to port its math to C++ with the Rust crate as test oracle). **Never push to arthar.**
+  In this repo, `xenharmonic_software_notes.md` / `questions.md` are old ArtHar planning docs —
+  math reference only; their tech/UI/design decisions don't apply. `Concepts/` = ArtHar art; ignore.
 
 ---
 
@@ -75,3 +77,4 @@ comes from GitHub Actions.
 | `docs/LOG.md` | Append-only chronological log incl. failures + user feedback | every task |
 | `docs/LESSONS.md` | Gotchas (JUCE, FL Studio, CI, DSP) — "don't repeat this" | on failure/surprise |
 | `docs/IDEAS.md` | Plugin idea backlog + status (idea/tried/shipped/killed) | when ideas change |
+| `docs/ARTHAR_REFERENCE.md` | ArtHar calculator summary + integration decision | when porting/re-syncing |

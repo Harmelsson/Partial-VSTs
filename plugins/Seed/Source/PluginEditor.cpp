@@ -3,165 +3,165 @@
 
 namespace th = pvst::theme;
 
-// ================================================================================================
-// PartialView
-// ================================================================================================
-void PartialView::tick()
-{
-    const double seedVal = juce::jmax (1e-6f, state.getRawParameterValue (seed::ids::seed)->load());
-    const int count = (int) std::lround (state.getRawParameterValue (seed::ids::partials)->load());
-    const double rolloff = state.getRawParameterValue (seed::ids::rolloff)->load();
-    const double S = xen::stretchFactor (seedVal);
-
-    float lo = 0.0f, hi = 0.0f;
-    for (int p = 0; p < seed::kMaxPartials; ++p)
-    {
-        const float c = (float) (1200.0 * S * std::log2 ((double) p + 1));
-        // Height: loudness on a gentle (square-root) scale so quiet high partials stay visible.
-        const float h = p < count ? (float) std::sqrt (xen::rolloffShape (p + 1, rolloff)) : 0.0f;
-        cents[(size_t) p] = first ? c : th::ease (cents[(size_t) p], c, 0.18f);
-        height[(size_t) p] = first ? h : th::ease (height[(size_t) p], h, 0.18f);
-        if (p < count) { lo = juce::jmin (lo, c); hi = juce::jmax (hi, c); }
-    }
-    // The view range glides too, so the picture never snaps.
-    const float span = juce::jmax (1200.0f, hi - lo);
-    viewMin = first ? lo - span * 0.04f : th::ease (viewMin, lo - span * 0.04f, 0.12f);
-    viewMax = first ? hi + span * 0.04f : th::ease (viewMax, hi + span * 0.04f, 0.12f);
-    period = first ? (float) xen::periodCents (seedVal) : th::ease (period, (float) xen::periodCents (seedVal), 0.18f);
-    first = false;
-    repaint();
-}
-
-void PartialView::paint (juce::Graphics& g)
-{
-    auto b = getLocalBounds().toFloat();
-    g.setColour (th::panel);
-    g.fillRoundedRectangle (b, 14.0f);
-    auto plot = b.reduced (18.0f, 16.0f);
-    const float base = plot.getBottom();
-    auto xOf = [&] (float c) { return plot.getX() + (c - viewMin) / (viewMax - viewMin) * plot.getWidth(); };
-
-    // Seed "octave" guides (skip if they'd be too dense to read).
-    if (std::abs (period) > 1.0f && std::abs (period) / (viewMax - viewMin) * plot.getWidth() > 14.0f)
-    {
-        g.setColour (th::panelEdge.brighter (0.25f));
-        const float step = std::abs (period);
-        for (float c = std::floor (viewMin / step) * step; c <= viewMax; c += step)
-            if (c >= viewMin)
-                g.drawVerticalLine ((int) xOf (c), plot.getY(), base);
-    }
-    g.setColour (th::panelEdge.brighter (0.4f));
-    g.drawHorizontalLine ((int) base, plot.getX(), plot.getRight());
-
-    // Partials: a soft glow line + a bright cap. The fundamental gets the second accent.
-    for (int p = seed::kMaxPartials - 1; p >= 0; --p)
-    {
-        const float h = height[(size_t) p];
-        if (h < 0.002f) continue;
-        const float x = xOf (cents[(size_t) p]);
-        const float top = base - h * plot.getHeight();
-        const auto col = p == 0 ? th::accent2 : th::accent;
-        g.setColour (col.withAlpha (0.18f * juce::jmin (1.0f, h * 3.0f)));
-        g.fillRoundedRectangle (x - 3.0f, top, 6.0f, base - top, 3.0f);
-        g.setColour (col.withAlpha (0.35f + 0.65f * juce::jmin (1.0f, h * 2.0f)));
-        g.drawLine (x, top, x, base, 1.6f);
-        g.fillEllipse (x - 3.0f, top - 3.0f, 6.0f, 6.0f);
-    }
-
-    g.setColour (th::textDim);
-    g.setFont (th::font (12.0f));
-    g.drawText ("partials", b.reduced (14.0f, 8.0f).removeFromTop (16.0f), juce::Justification::topRight);
-}
-
-// ================================================================================================
-// SeedEditor
-// ================================================================================================
 SeedEditor::SeedEditor (SeedProcessor& pr)
-    : AudioProcessorEditor (pr), proc (pr), partialView (pr.apvts),
-      seedKnob (p (seed::ids::seed), "Seed"),
-      partialsKnob (p (seed::ids::partials), "Partials"),
-      rolloffKnob (p (seed::ids::rolloff), "Rolloff"),
-      attackKnob (p (seed::ids::attack), "Attack", th::accent2),
-      releaseKnob (p (seed::ids::release), "Release", th::accent2),
-      gainKnob (p (seed::ids::gain), "Gain", th::accent2),
-      droneNoteKnob (p (seed::ids::droneNote), "Drone note", th::accent2),
-      keysToggle (p (seed::ids::keysFollow), "Keys follow seed"),
-      droneToggle (p (seed::ids::drone), "Drone")
+    : AudioProcessorEditor (pr), proc (pr),
+      fundamentalBox (p (seed::ids::fundamental), "Fundamental (Hz)", 4, 2, 1.0),
+      seedBox (p (seed::ids::seed), "Seed", 1, 6, 0.01),
+      partialsBox (p (seed::ids::partials), "Partials", 2, 0, 1.0),
+      rolloffBox (p (seed::ids::rolloff), "Rolloff", 1, 2, 0.1),
+      minDipBox (p (seed::ids::minDip), "Min dip strength (%)", 2, 1, 1.0),
+      envelope (p (seed::ids::attack), p (seed::ids::decay), p (seed::ids::sustain), p (seed::ids::release)),
+      attackBox (p (seed::ids::attack), "Attack (ms)", 4, 0, 1.0),
+      decayBox (p (seed::ids::decay), "Decay (ms)", 5, 0, 10.0),
+      sustainBox (p (seed::ids::sustain), "Sustain (%)", 3, 1, 1.0),
+      releaseBox (p (seed::ids::release), "Release (ms)", 5, 0, 10.0),
+      velocityBox (p (seed::ids::velocity), "Velocity (%)", 3, 0, 5.0),
+      gainBox (p (seed::ids::gain), "Gain (dB)", 2, 1, 0.5),
+      droneNoteBox (p (seed::ids::droneNote), "Drone note", 3, 0, 1.0),
+      keysToggle (p (seed::ids::keysFollow), "Keys", "12-EDO", "Seed"),
+      droneToggle (p (seed::ids::drone), "Drone", "Off", "On")
 {
-    seedKnob.setValueFontSize (26.0f);
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &partialView, &seedKnob, &partialsKnob, &rolloffKnob,
-                                                                      &attackKnob, &releaseKnob, &gainKnob, &droneNoteKnob,
-                                                                      &keysToggle, &droneToggle })
+    droneNoteBox.suffix = [] (double n) { return juce::MidiMessage::getMidiNoteName (juce::roundToInt (n), true, true, 4); };
+
+    for (juce::Component* c : std::initializer_list<juce::Component*> {
+             &fundamentalBox, &seedBox, &partialsBox, &rolloffBox, &minDipBox, &curvePlot, &partialsPlot, &scaleTable,
+             &envelope, &attackBox, &decayBox, &sustainBox, &releaseBox, &velocityBox, &gainBox, &droneNoteBox,
+             &keysToggle, &droneToggle })
         addAndMakeVisible (c);
-    setSize (800, 500);
+
+    setSize (1160, 800);
+    lastTick = juce::Time::getMillisecondCounterHiRes();
+    timerCallback();
     startTimerHz (60);
 }
 
 SeedEditor::~SeedEditor() { stopTimer(); }
 
+xen::CalculatorSettings SeedEditor::currentSettings() const
+{
+    auto& s = proc.apvts;
+    xen::CalculatorSettings c;
+    c.fundamentalHz = s.getRawParameterValue (seed::ids::fundamental)->load();
+    c.seed = s.getRawParameterValue (seed::ids::seed)->load();
+    c.partials = (int) std::lround (s.getRawParameterValue (seed::ids::partials)->load());
+    c.rolloff = s.getRawParameterValue (seed::ids::rolloff)->load();
+    c.minStrength = s.getRawParameterValue (seed::ids::minDip)->load() / 100.0;
+    return c;
+}
+
 void SeedEditor::timerCallback()
 {
-    partialView.tick();
-    for (auto* k : { &seedKnob, &partialsKnob, &rolloffKnob, &attackKnob, &releaseKnob, &gainKnob, &droneNoteKnob })
-        k->tick();
-    keysToggle.tick();
-    droneToggle.tick();
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    const float dt = (float) juce::jlimit (0.001, 0.1, (now - lastTick) / 1000.0);
+    lastTick = now;
 
-    // Seed read-out under the big knob: what the seed means in musical terms.
-    const double s = proc.apvts.getRawParameterValue (seed::ids::seed)->load();
-    const auto info = "octave " + juce::String (xen::periodCents (s), 1) + " c   \xc2\xb7   stretch " + juce::String (xen::stretchFactor (s), 4);
-    if (info != seedInfo) { seedInfo = info; repaint(); }
+    const auto settings = currentSettings();
+    worker.request (settings);
+    if (worker.fetch (latest, seenId))
+    {
+        curvePlot.setResult (latest);
+        scaleTable.setResult (latest);
+    }
+    // Only say "calculating..." if it takes long enough to notice.
+    if (! worker.isBusy()) busySince = 0.0;
+    else if (busySince <= 0.0) busySince = now;
+    curvePlot.setBusy (busySince > 0.0 && now - busySince > 150.0);
+
+    partialsPlot.setSettings (settings);
+    curvePlot.tick (dt);
+    partialsPlot.tick (dt);
+    envelope.tick (dt);
+
+    // Info line under the calculator's boxes (ArtHar wording).
+    const int found = latest.curve.valid ? (int) latest.curve.notes.size() - 2 : 0;
+    const auto newInfo = "Stretch factor " + juce::String (xen::stretchFactor (settings.seed), 6)
+                       + th::dot() + "\"octave\" " + juce::String (xen::periodCents (settings.seed), 4) + " cents"
+                       + th::dot() + juce::String (found) + " notes found by the dissonance curve"
+                       + th::dot() + "voices " + juce::String (proc.uiActiveVoices.load());
+    if (newInfo != info) { info = newInfo; repaint (calcArea); }
 }
 
 void SeedEditor::paint (juce::Graphics& g)
 {
-    g.setGradientFill (juce::ColourGradient (th::bgTop, 0, 0, th::bgBottom, 0, (float) getHeight(), false));
-    g.fillAll();
+    g.fillAll (th::bg);
 
-    g.setColour (th::text);
-    g.setFont (th::font (22.0f, true));
-    g.drawText ("Seed", 24, 14, 200, 28, juce::Justification::centredLeft);
-    g.setColour (th::textDim);
-    g.setFont (th::font (13.0f));
-    g.drawText ("stretched-partial synth", 86, 18, 260, 22, juce::Justification::centredLeft);
-
-    // The seed's meaning, under the big knob.
-    g.setColour (th::textDim);
-    g.setFont (th::font (13.0f));
-    g.drawText (seedInfo, juce::Rectangle<int> (seedKnob.getX() - 60, seedKnob.getBottom() + 2, seedKnob.getWidth() + 120, 20),
-                juce::Justification::centred);
+    // Header: name + letter-spaced subtitle (ArtHar: "ArtHar  XENHARMONIC SOUND-DESIGN CALCULATOR").
+    g.setColour (th::fg);
+    g.setFont (th::sans (30.0f));
+    g.drawText ("Seed", 14, 6, 90, 36, juce::Justification::centredLeft);
+    g.setColour (th::dim());
+    g.setFont (th::sans (11.5f).withExtraKerningFactor (0.25f));
+    g.drawText ("STRETCHED-PARTIAL SYNTH", 94, 12, 400, 24, juce::Justification::centredLeft);
 
     // Version + build: the user checks this to confirm FL loaded the newest build.
-    g.setColour (th::textDim.withAlpha (0.7f));
-    g.setFont (th::font (11.0f));
-    const juce::String ver = juce::String ("v") + seed::kVersion + "  \xc2\xb7  build " + PVST_BUILD_NUMBER + "  \xc2\xb7  " + PVST_GIT_HASH
-                           + "  \xc2\xb7  voices " + juce::String (proc.uiActiveVoices.load());
-    g.drawText (ver, getLocalBounds().reduced (16, 8).removeFromBottom (14), juce::Justification::centredRight);
+    g.setColour (th::mix (0.4f));
+    g.setFont (th::sans (11.5f));
+    const juce::String ver = juce::String ("v") + seed::kVersion + th::dot() + "build " + PVST_BUILD_NUMBER + th::dot() + PVST_GIT_HASH;
+    g.drawText (ver, getLocalBounds().reduced (14, 0).removeFromTop (46), juce::Justification::centredRight);
+
+    // Section frames that hold several child controls.
+    auto calcInner = th::drawSection (g, calcArea, "Calculator");
+    g.setColour (th::dim());
+    g.setFont (th::sans (12.5f));
+    g.drawText (info, calcInner.removeFromBottom (18), juce::Justification::centredLeft);
+    th::drawSection (g, envArea, "Envelope");
+    th::drawSection (g, voiceArea, "Voice & output");
 }
 
 void SeedEditor::resized()
 {
-    auto b = getLocalBounds().reduced (20);
-    b.removeFromTop (34);                               // title
-    partialView.setBounds (b.removeFromTop (160));
-    b.removeFromTop (12);
+    constexpr int m = 12, gap = 8;
+    auto b = getLocalBounds().reduced (m, 0);
+    b.removeFromTop (46);
 
-    auto bottom = b.removeFromBottom (34);             // toggles (version text is painted below)
-    keysToggle.setBounds (bottom.removeFromLeft (200).withSizeKeepingCentre (200, 26));
-    droneToggle.setBounds (bottom.removeFromLeft (120).withSizeKeepingCentre (120, 26));
+    // Calculator bar.
+    calcArea = b.removeFromTop (100);
+    {
+        auto row = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
+        auto place = [&] (juce::Component& c, int w) { c.setBounds (row.removeFromLeft (w)); row.removeFromLeft (18); };
+        place (fundamentalBox, 130);
+        place (seedBox, 150);
+        place (partialsBox, 80);
+        place (rolloffBox, 90);
+        place (minDipBox, 150);
+    }
+    b.removeFromTop (gap);
 
-    // Big seed knob on the left; its read-out line is painted just under it (see paint()).
-    auto seedArea = b.removeFromLeft (250);
-    seedKnob.setBounds (seedArea.getX() + (seedArea.getWidth() - 170) / 2, seedArea.getY(), 170, 190);
+    // Plots + scale table.
+    auto middle = b.removeFromTop (450);
+    scaleTable.setBounds (middle.removeFromRight (340));
+    middle.removeFromRight (gap);
+    curvePlot.setBounds (middle.removeFromTop (260));
+    middle.removeFromTop (gap);
+    partialsPlot.setBounds (middle);
+    b.removeFromTop (gap);
 
-    // Six smaller knobs, 3 x 2.
-    b.removeFromLeft (10);
-    const int w = b.getWidth() / 3;
-    auto row1 = b.removeFromTop (b.getHeight() / 2);
-    partialsKnob.setBounds (row1.removeFromLeft (w).reduced (8, 2));
-    rolloffKnob.setBounds (row1.removeFromLeft (w).reduced (8, 2));
-    gainKnob.setBounds (row1.reduced (8, 2));
-    attackKnob.setBounds (b.removeFromLeft (w).reduced (8, 2));
-    releaseKnob.setBounds (b.removeFromLeft (w).reduced (8, 2));
-    droneNoteKnob.setBounds (b.reduced (8, 2));
+    // Envelope + voice.
+    auto bottom = b.removeFromTop (176);
+    voiceArea = bottom.removeFromRight (340);
+    bottom.removeFromRight (gap);
+    envArea = bottom;
+    {
+        auto inner = envArea.reduced (10, 6).withTrimmedTop (20);
+        envelope.setBounds (inner.removeFromLeft (390));
+        inner.removeFromLeft (16);
+        auto row1 = inner.removeFromTop (60).withTrimmedTop (4);
+        auto row2 = inner.removeFromTop (60).withTrimmedTop (4);
+        auto place = [] (juce::Rectangle<int>& row, juce::Component& c, int w) { c.setBounds (row.removeFromLeft (w).withHeight (48)); row.removeFromLeft (14); };
+        place (row1, attackBox, 100);
+        place (row1, decayBox, 110);
+        place (row1, sustainBox, 110);
+        place (row2, releaseBox, 110);
+        place (row2, velocityBox, 110);
+    }
+    {
+        auto inner = voiceArea.reduced (10, 6).withTrimmedTop (20);
+        auto row1 = inner.removeFromTop (60).withTrimmedTop (4);
+        auto row2 = inner.removeFromTop (60).withTrimmedTop (4);
+        auto place = [] (juce::Rectangle<int>& row, juce::Component& c, int w) { c.setBounds (row.removeFromLeft (w).withHeight (48)); row.removeFromLeft (16); };
+        place (row1, gainBox, 110);
+        place (row1, keysToggle, 170);
+        place (row2, droneToggle, 110);
+        place (row2, droneNoteBox, 150);
+    }
 }

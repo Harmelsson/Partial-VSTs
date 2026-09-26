@@ -4,7 +4,7 @@ juce_add_plugin(Seed
     PLUGIN_MANUFACTURER_CODE Prtl      # shared by every plugin in this repo
     PLUGIN_CODE Seed                   # unique per plugin, never change after release
     PRODUCT_NAME "Seed"
-    VERSION 0.1.0
+    VERSION 0.2.0
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE

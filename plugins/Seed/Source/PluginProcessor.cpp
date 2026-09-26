@@ -42,6 +42,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout SeedProcessor::createLayout(
         AudioParameterFloatAttributes().withLabel ("dB").withStringFromValueFunction (
             [] (float x, int) { return String (x, 1) + " dB"; })));
 
+    // ---- v0.2.0 additions (version hint 2: never renumber, never reuse ids) -------------------
+    const int v2 = 2;
+    // The pitch the Calculator works at (roughness depends on real Hz) and key 60's pitch when
+    // the keys follow the seed. Default = middle C, where key 60 sits anyway.
+    NormalisableRange<float> fundRange (20.0f, 2000.0f, 0.0f);
+    fundRange.setSkewForCentre (300.0f);
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ids::fundamental, v2 }, "Fundamental", fundRange, 261.6256f,
+        AudioParameterFloatAttributes().withLabel ("Hz").withStringFromValueFunction ([] (float x, int) { return String (x, 2) + " Hz"; })));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ids::minDip, v2 }, "Min dip strength",
+        NormalisableRange<float> (0.0f, 50.0f, 0.0f), 2.0f,
+        AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction ([] (float x, int) { return String (x, 1) + " %"; })));
+    NormalisableRange<float> decayRange (1.0f, 10000.0f, 0.0f);
+    decayRange.setSkewForCentre (500.0f);
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ids::decay, v2 }, "Decay", decayRange, 600.0f,
+        AudioParameterFloatAttributes().withLabel ("ms").withStringFromValueFunction ([] (float x, int) { return String (roundToInt (x)) + " ms"; })));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ids::sustain, v2 }, "Sustain",
+        NormalisableRange<float> (0.0f, 100.0f, 0.0f), 60.0f,
+        AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction ([] (float x, int) { return String (x, 1) + " %"; })));
+    layout.add (std::make_unique<AudioParameterFloat> (ParameterID { ids::velocity, v2 }, "Velocity sensitivity",
+        NormalisableRange<float> (0.0f, 100.0f, 0.0f), 100.0f,
+        AudioParameterFloatAttributes().withLabel ("%").withStringFromValueFunction ([] (float x, int) { return String (x, 0) + " %"; })));
+
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::keysFollow, v }, "Keys follow seed", false));
     layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::drone, v }, "Drone", false));
     layout.add (std::make_unique<AudioParameterInt> (ParameterID { ids::droneNote, v }, "Drone note", 24, 96, 48,
@@ -63,6 +85,10 @@ SeedProcessor::SeedProcessor()
     pKeysFollow = apvts.getRawParameterValue (ids::keysFollow);
     pDrone = apvts.getRawParameterValue (ids::drone);
     pDroneNote = apvts.getRawParameterValue (ids::droneNote);
+    pFundamental = apvts.getRawParameterValue (ids::fundamental);
+    pDecay = apvts.getRawParameterValue (ids::decay);
+    pSustain = apvts.getRawParameterValue (ids::sustain);
+    pVelocity = apvts.getRawParameterValue (ids::velocity);
 }
 
 bool SeedProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -87,7 +113,11 @@ void SeedProcessor::syncParams()
     params.partials = juce::jlimit (1, kMaxPartials, (int) std::lround (pPartials->load()));
     params.rolloff = pRolloff->load();
     params.attackMs = pAttack->load();
+    params.decayMs = pDecay->load();
+    params.sustain = pSustain->load() / 100.0;
     params.releaseMs = pRelease->load();
+    params.velocitySens = pVelocity->load() / 100.0;
+    params.fundamentalHz = pFundamental->load();
     params.gainDb = pGain->load();
     params.keysFollowSeed = pKeysFollow->load() > 0.5f ? 1.0 : 0.0;
     params.pitchBendCents = pitchBendCents;

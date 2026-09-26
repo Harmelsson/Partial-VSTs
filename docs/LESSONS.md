@@ -42,3 +42,13 @@ Format: **topic** — what happened → what to do instead. (date)
 - **Cross-compiling Windows from Linux** was considered and rejected (unofficial toolchain, can't
   test the result here). CI on a real Windows runner stays the source of user builds. Possible
   speed-up later: Ninja + sccache in CI.
+
+## JUCE 8 API gotchas
+- `Font::getStringWidthFloat` no longer exists → `juce::GlyphArrangement::getStringWidth (font, text)`.
+- Non-ASCII literals: `juce::String ("·")` reads bytes as Latin-1 → "Â·". Use `theme::u8 (...)`
+  (String::fromUTF8). (2026-09-26)
+- Don't name a Component method `hitTest(...)` with other args: hides `Component::hitTest(int,int)`
+  (-Woverloaded-virtual).
+## DSP
+- One-pole smoothing never reaches its target exactly → anything testing `== 0` (sustain 0 ends a
+  note) must snap when close. `smoothTowards` in SeedEngine does this now. (2026-09-26)

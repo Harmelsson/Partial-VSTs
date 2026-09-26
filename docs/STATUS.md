@@ -3,27 +3,25 @@
 _Last updated: 2026-09-26 (session 1)_
 
 ## What exists
-- **Seed v0.1.0** (`plugins/Seed/`, see its README): stretched-partial additive synth, 64 partials,
-  16 voices, live glides on held notes, keys-follow-seed, drone, gentle custom UI.
-  22 headless checks pass on Linux (`tools/SeedTests.cpp`).
-- Pipeline: CMake + JUCE 8.0.15 (FetchContent). GitHub Actions (`.github/workflows/build.yml`)
-  builds Windows VST3 + standalone, runs tests, uploads zip `PartialVSTs-windows-build-N`.
-  CI now also publishes each green build as a **GitHub Release** `build-N` (front page → Releases),
-  starting with run #3. **Run #2 = first green Windows build** (artifact
-  PartialVSTs-windows-build-2, run https://github.com/Harmelsson/Partial-VSTs/actions/runs/36225275621).
-  Docs-only pushes no longer trigger builds.
-- `shared/`: `xen/Stretch.h` (copied math), `dsp/SafetyStage.h` (non-bypassable), `ui/` (theme,
-  SmoothKnob, SmoothToggle).
-- Docs: CLAUDE.md, docs/{STATUS, LOG, LESSONS, IDEAS, TESTING, ARTHAR_REFERENCE, SEED_NOTE_LIFE}.
+- **Seed v0.2.0** (`plugins/Seed/`, see its README): ArtHar-style redesign; Calculator bar on top
+  (Fundamental, Seed, Partials, Rolloff, Min dip strength) with live dissonance curve, partials
+  plot and scale table; full ADSR (draggable envelope picture) + velocity sensitivity.
+  35 headless checks pass on Linux (`tools/SeedTests.cpp`), incl. the C++ dissonance copy
+  reproducing ArtHar's pinned notes (seed 2: 315.6 386.3 498.0 582.5 702.0 813.7 884.4 968.8).
+- **Shared kit for all future synths** (`shared/`): `xen/` Stretch, Dissonance (copy of ArtHar's
+  method), CalculatorWorker (background thread); `ui/` Theme (ArtHar two-colour), Controls
+  (per-digit ScrubBox, SegmentedToggle), SquareLattice (square-dot plots + afterglow),
+  CalculatorViews (curve / partials / scale table), EnvelopeView; `dsp/` SafetyStage.
+- Pipeline: GitHub Actions builds Windows VST3 + standalone on every non-docs push, runs tests,
+  publishes a GitHub **Release** `Build N` (front page → Releases). Run #2 = first green build.
 
-## User should test (Seed v0.1.0) — install guide: docs/TESTING.md
-1. Seed 2.0, hold a note: should sound like a soft, plain saw-ish tone.
-2. Hold a note/chord and scrub Seed slowly: partials should glide, never click.
-3. Seed below 1 (undertones), exactly 1 (collapse), 3–4 (bells): weird on purpose.
-4. Partials / Rolloff while holding: smooth fades.
-5. "Keys follow seed" on: 12 keys = the seed's octave; toggling while holding glides.
-6. Drone on: sound without MIDI. Middle-click resets a knob, double-click types a value.
-7. Knob feel: too slow/fast? Bottom-right label must show the downloaded build number.
+## User should test (Seed v0.2.0) — install guide: docs/TESTING.md
+1. Look & feel vs ArtHar. Scrub digits of Seed while a note is held: curve, table, partials and
+   the sound should all move together.
+2. Velocity: soft vs hard notes. Envelope: drag the three hollow corners; try Sustain 0 (plucks).
+3. Fundamental changes the curve (roughness depends on Hz); with Keys = Seed it also moves key 60.
+4. Min dip strength: more/fewer notes in the table. Partials 64: curve still responsive?
+5. Scrub sensitivity: 18 px per step — too slow/fast?
 
 ## Next
 - **Seed v0.2**: user wants to TRY SEVERAL of the ideas in `docs/SEED_NOTE_LIFE.md` ("variety,

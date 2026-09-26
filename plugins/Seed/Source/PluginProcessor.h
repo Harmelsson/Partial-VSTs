@@ -19,10 +19,16 @@ namespace ids
     inline constexpr const char* keysFollow = "keysFollow";
     inline constexpr const char* drone = "drone";
     inline constexpr const char* droneNote = "droneNote";
+    // v0.2.0
+    inline constexpr const char* fundamental = "fundamental";
+    inline constexpr const char* minDip = "minDip";
+    inline constexpr const char* decay = "decay";
+    inline constexpr const char* sustain = "sustain";
+    inline constexpr const char* velocity = "velocity";
 } // namespace ids
 
 /// Version shown in the UI. Bump on EVERY change handed to the user.
-inline constexpr const char* kVersion = "0.1.0";
+inline constexpr const char* kVersion = "0.2.0";
 } // namespace seed
 
 class SeedProcessor : public juce::AudioProcessor
@@ -80,7 +86,9 @@ private:
     std::atomic<float>* pRolloff = nullptr; std::atomic<float>* pAttack = nullptr;
     std::atomic<float>* pRelease = nullptr; std::atomic<float>* pGain = nullptr;
     std::atomic<float>* pKeysFollow = nullptr; std::atomic<float>* pDrone = nullptr;
-    std::atomic<float>* pDroneNote = nullptr;
+    std::atomic<float>* pDroneNote = nullptr; std::atomic<float>* pFundamental = nullptr;
+    std::atomic<float>* pDecay = nullptr; std::atomic<float>* pSustain = nullptr;
+    std::atomic<float>* pVelocity = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SeedProcessor)
 };

@@ -1,0 +1,304 @@
+#pragma once
+// ArtHar-style controls bound to plugin parameters.
+//
+// ScrubBox — a number box where EACH DIGIT is scrubbable (ArtHar's core interaction):
+//   - Drag a digit up/down: changes the value by that digit's place value (tens digit = +-10,
+//     third decimal = +-0.001). Carry/borrow happen live. Up = more.
+//   - GENTLER than ArtHar (user asked, Seed is a synth): 18 px of drag per step (ArtHar: 10),
+//     Shift = 3x slower still.
+//   - Scroll wheel over a digit: one step of that digit per notch.
+//   - Small arrows on the right: +-arrowStep.
+//   - Double-click: type an exact value. Middle-click (or Alt+click): back to default.
+// SegmentedToggle — ArtHar's "Seed | Hand" style two-way switch for a bool parameter.
+#include <juce_audio_processors/juce_audio_processors.h>
+#include "ui/Theme.h"
+
+namespace pvst
+{
+class ScrubBox : public juce::Component
+{
+public:
+    ScrubBox (juce::RangedAudioParameter& p, juce::String labelText, int integerDigits, int decimalPlaces, double arrowStepSize = 1.0)
+        : param (p), label (std::move (labelText)), intDigits (integerDigits), decimals (decimalPlaces), arrowStep (arrowStepSize),
+          attachment (p, [this] (float) { repaint(); }, nullptr)
+    {
+        attachment.sendInitialUpdate();
+        const auto& r = param.getNormalisableRange();
+        lo = r.start; hi = r.end;
+        signed_ = lo < 0.0;
+        setRepaintsOnMouseActivity (true);
+        editor.setJustification (juce::Justification::centredLeft);
+        editor.setFont (theme::mono (16.0f));
+        editor.setColour (juce::TextEditor::backgroundColourId, theme::mix (0.08f));
+        editor.setColour (juce::TextEditor::textColourId, theme::text());
+        editor.setColour (juce::TextEditor::outlineColourId, theme::mix (0.5f));
+        editor.setColour (juce::TextEditor::focusedOutlineColourId, theme::mix (0.7f));
+        editor.setColour (juce::TextEditor::highlightColourId, theme::mix (0.3f));
+        editor.onReturnKey = [this] { commitText(); };
+        editor.onEscapeKey = [this] { editor.setVisible (false); };
+        editor.onFocusLost = [this] { commitText(); };
+        addChildComponent (editor);
+    }
+
+    /// Optional text drawn dim to the right of the box (e.g. a note name).
+    std::function<juce::String (double)> suffix;
+
+    /// Width this box wants (label above may be wider; the parent decides).
+    int preferredWidth() const { return (int) std::ceil (charW() * (float) numChars() + 16.0f + kArrowW); }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto b = getLocalBounds();
+        g.setColour (theme::dim());
+        g.setFont (theme::sans (12.5f));
+        g.drawText (label, b.removeFromTop (kLabelH), juce::Justification::bottomLeft);
+        b.removeFromTop (3);
+        auto box = boxArea();
+
+        g.setColour (theme::boxFill());
+        g.fillRect (box);
+        g.setColour (isMouseOverOrDragging() ? theme::mix (0.4f) : theme::frame());
+        g.drawRect (box, 1);
+
+        // Digits.
+        const auto str = valueString();
+        g.setFont (theme::mono (17.0f));
+        const float cw = charW();
+        const float x0 = (float) box.getX() + 7.0f;
+        for (int i = 0; i < str.length(); ++i)
+        {
+            const bool hot = i == hoverChar && placeOf (i) != kNoPlace;
+            g.setColour (hot ? theme::fg : theme::text());
+            g.drawText (juce::String::charToString (str[i]), juce::Rectangle<float> (x0 + cw * (float) i, (float) box.getY(), cw, (float) box.getHeight()),
+                        juce::Justification::centred, false);
+            if (hot)
+                g.fillRect (x0 + cw * (float) i + 1.0f, (float) box.getBottom() - 5.0f, cw - 2.0f, 1.0f);
+        }
+
+        // Arrows.
+        auto arrows = arrowArea();
+        g.setColour (theme::frame());
+        g.drawVerticalLine (arrows.getX(), (float) box.getY() + 1, (float) box.getBottom() - 1);
+        auto up = arrows.removeFromTop (arrows.getHeight() / 2).toFloat().reduced (3.5f, 4.5f);
+        auto dn = arrows.toFloat().reduced (3.5f, 4.5f);
+        juce::Path pu, pd;
+        pu.addTriangle (up.getCentreX(), up.getY(), up.getRight(), up.getBottom(), up.getX(), up.getBottom());
+        pd.addTriangle (dn.getX(), dn.getY(), dn.getRight(), dn.getY(), dn.getCentreX(), dn.getBottom());
+        g.setColour (theme::mix (hoverArrow == 1 ? 0.9f : 0.45f));
+        g.fillPath (pu);
+        g.setColour (theme::mix (hoverArrow == -1 ? 0.9f : 0.45f));
+        g.fillPath (pd);
+
+        if (suffix)
+        {
+            g.setColour (theme::dim());
+            g.setFont (theme::sans (13.0f));
+            g.drawText (suffix (value()), box.getRight() + 8, box.getY(), 60, box.getHeight(), juce::Justification::centredLeft);
+        }
+    }
+
+    void resized() override { editor.setBounds (boxArea().withTrimmedRight (kArrowW)); }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        const int c = charAt (e.position.x), a = arrowAt (e.position);
+        if (c != hoverChar || a != hoverArrow) { hoverChar = c; hoverArrow = a; repaint(); }
+    }
+    void mouseExit (const juce::MouseEvent&) override { hoverChar = -1; hoverArrow = 0; repaint(); }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isMiddleButtonDown() || e.mods.isAltDown())
+        {
+            attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue()));
+            return;
+        }
+        if (const int a = arrowAt (e.position); a != 0)
+        {
+            setValue (value() + a * arrowStep, true);
+            return;
+        }
+        dragPlace = placeOf (nearestDigit (charAt (e.position.x)));
+        if (dragPlace == kNoPlace) return;
+        attachment.beginGesture();
+        dragging = true;
+        dragStartValue = value();
+        dragAccum = 0.0f;
+        lastY = e.position.y;
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! dragging) return;
+        const float pxPerStep = e.mods.isShiftDown() ? 54.0f : 18.0f;
+        dragAccum += (lastY - e.position.y) / pxPerStep;
+        lastY = e.position.y;
+        const double steps = std::trunc (dragAccum);
+        setValue (dragStartValue + steps * std::pow (10.0, dragPlace), false);
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (dragging) attachment.endGesture();
+        dragging = false;
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (arrowAt (e.position) != 0) return;
+        editor.setText (juce::String (value(), decimals), false);
+        editor.setVisible (true);
+        editor.grabKeyboardFocus();
+        editor.selectAll();
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        const float d = (juce::exactlyEqual (w.deltaY, 0.0f) ? w.deltaX : w.deltaY) * (w.isReversed ? -1.0f : 1.0f);
+        if (juce::exactlyEqual (d, 0.0f)) return;
+        int place = placeOf (nearestDigit (charAt (e.position.x)));
+        if (place == kNoPlace) place = -decimals;
+        setValue (value() + (d > 0 ? 1.0 : -1.0) * std::pow (10.0, place), true);
+    }
+
+private:
+    static constexpr int kLabelH = 16, kArrowW = 14, kNoPlace = 1000;
+
+    juce::Rectangle<int> boxArea() const
+    {
+        auto b = getLocalBounds().withTrimmedTop (kLabelH + 3);
+        return b.withWidth (juce::jmin (b.getWidth(), preferredWidth())).withHeight (juce::jmin (b.getHeight(), 28));
+    }
+    juce::Rectangle<int> arrowArea() const { return boxArea().removeFromRight (kArrowW); }
+
+    float charW() const { return juce::GlyphArrangement::getStringWidth (theme::mono (17.0f), "0"); }
+    int numChars() const { return (signed_ ? 1 : 0) + intDigits + (decimals > 0 ? 1 + decimals : 0); }
+
+    double value() const { return param.convertFrom0to1 (param.getValue()); }
+
+    void setValue (double v, bool asCompleteGesture)
+    {
+        v = juce::jlimit (lo, hi, v);
+        const float norm = param.convertTo0to1 ((float) v);
+        if (asCompleteGesture) attachment.setValueAsCompleteGesture (param.convertFrom0to1 (norm));
+        else attachment.setValueAsPartOfGesture (param.convertFrom0to1 (norm));
+    }
+
+    /// Fixed-width text: sign slot, integer digits padded with spaces, decimals.
+    juce::String valueString() const
+    {
+        const double v = value();
+        auto s = juce::String (std::abs (v), decimals);
+        if (decimals == 0) s = juce::String (juce::roundToInt (std::abs (v)));
+        const int intLen = decimals > 0 ? s.indexOfChar ('.') : s.length();
+        s = juce::String::repeatedString (" ", juce::jmax (0, intDigits - intLen)) + s;
+        if (signed_) s = (v < -1e-12 ? "-" : " ") + s;
+        return s;
+    }
+
+    /// Power of ten of the character at index i, or kNoPlace for sign/point/padding.
+    int placeOf (int i) const
+    {
+        if (i < 0 || i >= numChars()) return kNoPlace;
+        const int first = signed_ ? 1 : 0;
+        if (i < first) return kNoPlace;
+        const int k = i - first;
+        if (k < intDigits) return intDigits - 1 - k;
+        if (decimals == 0 || k == intDigits) return kNoPlace; // past the end / the decimal point
+        const int d = k - intDigits - 1;
+        return d < decimals ? -(d + 1) : kNoPlace;
+    }
+
+    /// Clicking a space/sign/point picks the nearest real digit instead.
+    int nearestDigit (int i) const
+    {
+        if (i < 0) return -1;
+        for (int off = 0; off < numChars(); ++off)
+        {
+            if (placeOf (i + off) != kNoPlace) return i + off;
+            if (placeOf (i - off) != kNoPlace) return i - off;
+        }
+        return -1;
+    }
+
+    int charAt (float x) const
+    {
+        const auto box = boxArea();
+        if (x >= (float) (box.getRight() - kArrowW) || x < (float) box.getX()) return -1;
+        return juce::jlimit (0, numChars() - 1, (int) std::floor ((x - (float) box.getX() - 7.0f) / charW()));
+    }
+
+    int arrowAt (juce::Point<float> p) const
+    {
+        const auto a = arrowArea();
+        if (! a.toFloat().contains (p)) return 0;
+        return p.y < (float) a.getCentreY() ? 1 : -1;
+    }
+
+    void commitText()
+    {
+        if (! editor.isVisible()) return;
+        editor.setVisible (false);
+        const auto t = editor.getText().trim().replaceCharacter (',', '.');
+        if (t.containsAnyOf ("0123456789")) setValue (t.getDoubleValue(), true);
+    }
+
+    juce::RangedAudioParameter& param;
+    juce::String label;
+    int intDigits, decimals;
+    double arrowStep, lo = 0.0, hi = 1.0;
+    bool signed_ = false;
+    juce::ParameterAttachment attachment;
+    juce::TextEditor editor;
+    int hoverChar = -1, hoverArrow = 0, dragPlace = kNoPlace;
+    bool dragging = false;
+    double dragStartValue = 0.0;
+    float dragAccum = 0.0f, lastY = 0.0f;
+};
+
+class SegmentedToggle : public juce::Component
+{
+public:
+    SegmentedToggle (juce::RangedAudioParameter& p, juce::String labelText, juce::String offText, juce::String onText)
+        : param (p), label (std::move (labelText)), texts { std::move (offText), std::move (onText) },
+          attachment (p, [this] (float) { repaint(); }, nullptr)
+    {
+        attachment.sendInitialUpdate();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto b = getLocalBounds();
+        g.setColour (theme::dim());
+        g.setFont (theme::sans (12.5f));
+        g.drawText (label, b.removeFromTop (16), juce::Justification::bottomLeft);
+        b.removeFromTop (3);
+        b = b.withHeight (juce::jmin (b.getHeight(), 28));
+        const bool on = param.getValue() > 0.5f;
+        for (int i = 0; i < 2; ++i)
+        {
+            auto cell = i == 0 ? b.removeFromLeft (b.getWidth() / 2) : b;
+            const bool sel = (i == 1) == on;
+            g.setColour (sel ? theme::selected() : theme::boxFill());
+            g.fillRect (cell);
+            g.setColour (theme::frame());
+            g.drawRect (cell, 1);
+            g.setColour (sel ? theme::fg : theme::dim());
+            g.setFont (theme::sans (14.0f));
+            g.drawText (texts[i], cell, juce::Justification::centred);
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        const bool clickedOn = e.position.x > (float) getWidth() * 0.5f;
+        attachment.setValueAsCompleteGesture (clickedOn ? 1.0f : 0.0f);
+    }
+
+private:
+    juce::RangedAudioParameter& param;
+    juce::String label;
+    juce::String texts[2];
+    juce::ParameterAttachment attachment;
+};
+} // namespace pvst

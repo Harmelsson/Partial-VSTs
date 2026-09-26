@@ -95,3 +95,17 @@ background worker; ArtHar-style shared UI kit (two-colour theme, per-digit Scrub
 toggles, square lattice plots with easing + afterglow, scale table); ADSR + velocity sensitivity;
 Fundamental + Min dip strength params. Keyboard does NOT play the found scale yet (that's the
 note-life work, next).
+
+## 2026-09-26 — session 1 — Seed v0.2.0 (ArtHar redesign + calculator + ADSR)
+**Done:** C++ copy of ArtHar dissonance.rs (`shared/xen/Dissonance.h`, differences documented in
+its header: pruned negligible pairs, grid ≤2000 points, |period| for seeds < 1) + background
+worker; ArtHar-style UI kit in `shared/ui/`; Seed editor rebuilt (1160×800); new params
+fundamental, minDip, decay, sustain, velocity (version hint 2); engine ADSR + velocity curve
+(vel^(2·sens)) + fundamental as key-60 anchor in Seed-keys mode.
+**Verified:** 35/35 checks. Curve copy matches ArtHar's pinned seed-2 notes to 0.1 c and seed 2.5's
+strongest dip (927.93 c). 64 partials: ~90 ms per curve.
+**Failures along the way (fixed):** `Font::getStringWidthFloat` gone in JUCE 8; a member named
+`hitTest` hid Component::hitTest; sustain 0 never ended notes (smoothed value never reached 0 →
+smoothing now snaps); "·" rendered as "Â·" (JUCE reads const char* as Latin-1); scale table clipped.
+**Found, not a bug:** seed 0.5 (undertones) has only shallow dips (fifth ≈1.5%) → with the default
+2% cut-off its scale is empty. Musically real: loud partials in the bass = smooth roughness.

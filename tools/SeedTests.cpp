@@ -10,10 +10,14 @@
 //   keys      "keys follow seed": 12 keys up from middle C lands on exactly seed x 261.63 Hz
 //   drone     drone plays without MIDI and fades out when switched off
 //   state     saving and re-loading a project restores every parameter
+//   curve     the C++ dissonance-curve copy finds ArtHar's pinned notes (seed 2: 6/5, 5/4, 4/3...)
+//   velocity  note volume follows velocity (vel^2 at 100% sensitivity, flat at 0%)
+//   envelope  decay settles on the sustain level; sustain 0 ends the note while held
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "xen/Stretch.h"
+#include "xen/CalculatorWorker.h"
 
 namespace
 {
@@ -256,12 +260,99 @@ void testState()
            "seed " + juce::String (s, 4) + ", partials " + juce::String (p));
 }
 
+void testCurve()
+{
+    std::cout << "dissonance curve (C++ copy of ArtHar's method)" << std::endl;
+    auto scaleFor = [] (double seed, double fund, double minStrength = 0.02) {
+        xen::CalculatorSettings cs; cs.seed = seed; cs.fundamentalHz = fund; cs.minStrength = minStrength;
+        xen::DissonanceCalculator calc; xen::CurveResult r;
+        calc.compute (cs.makePartials(), xen::periodCents (seed), cs.minStrength, r, [] { return false; });
+        return r;
+    };
+    // ArtHar PROJECT_LOG v0.2 "what to test": 440 Hz, seed 2, 16 partials, rolloff 1, 2%.
+    auto r = scaleFor (2.0, 440.0);
+    const double want[] = { 315.6, 386.3, 498.0, 582.5, 702.0, 813.7, 884.4, 968.8 };
+    bool ok = r.valid && r.notes.size() == 10;
+    juce::String got;
+    for (size_t i = 1; i + 1 < r.notes.size(); ++i) got << juce::String (r.notes[i].cents, 1) << " ";
+    for (size_t i = 0; ok && i < 8; ++i) ok &= std::abs (r.notes[i + 1].cents - want[i]) < 0.06;
+    check (ok, "seed 2 @440: 6/5 5/4 4/3 7/5 3/2 8/5 5/3 7/4", got);
+    // Strongest found note for seed 2 is the fifth, and seed 2.5's is the stretched fifth 927.9 c.
+    auto strongest = [] (const xen::CurveResult& res) {
+        const xen::ScaleNote* best = nullptr;
+        for (auto& n : res.notes) if (n.kind == xen::ScaleNote::Found && (! best || n.strength > best->strength)) best = &n;
+        return best ? best->cents : -1.0;
+    };
+    check (std::abs (strongest (r) - 701.955) < 0.01, "seed 2: strongest dip is the pure fifth", juce::String (strongest (r), 3));
+    auto r25 = scaleFor (2.5, 440.0);
+    check (std::abs (strongest (r25) - 927.93) < 0.05, "seed 2.5: strongest dip is the stretched fifth 927.9 c", juce::String (strongest (r25), 3));
+    check (std::abs (r25.notes.back().cents - 1586.3137) < 1e-3, "seed 2.5: scale ends on its 'octave' 1586.31 c");
+    auto r1 = scaleFor (1.0, 440.0);
+    check (! r1.valid, "seed 1: no octave, no scale (and no crash)");
+    // Undertones: the loud partials sit in the bass where roughness is smooth, so dips are
+    // shallow (the fifth is ~1.5%, under the default 2%). With min strength 0 it must be there.
+    auto rUnder = scaleFor (0.5, 440.0, 0.0);
+    bool fifth = false;
+    for (auto& n : rUnder.notes) fifth |= std::abs (n.cents - 701.955) < 0.1;
+    check (rUnder.valid && fifth, "seed 0.5 (undertones): finds the fifth at min strength 0", juce::String ((int) rUnder.notes.size()) + " notes");
+
+    // The background worker delivers a result.
+    xen::CalculatorWorker worker;
+    xen::CalculatorSettings cs; cs.seed = 2.5;
+    worker.request (cs);
+    xen::CalculatorOutput out; uint64_t seen = 0;
+    for (int i = 0; i < 400 && ! worker.fetch (out, seen); ++i) juce::Thread::sleep (5);
+    check (seen > 0 && out.curve.valid && juce::exactlyEqual (out.settings.seed, 2.5), "background worker returns the result",
+           juce::String (out.millis, 1) + " ms");
+}
+
+void testVelocity()
+{
+    std::cout << "velocity" << std::endl;
+    auto level = [] (float vel, float sens) {
+        Rig r;
+        r.set (seed::ids::velocity, sens);
+        r.set (seed::ids::sustain, 100.0f);
+        return toneAmp (tail (r.render (0.6, Rig::noteOn ({ 69 }, vel)), 0.3), 440.0);
+    };
+    const double full = level (1.0f, 100.0f), half = level (0.5f, 100.0f);
+    check (std::abs (half / full - 0.25) < 0.02, "100%: velocity 64 is a quarter of velocity 127 (-12 dB)", juce::String (half / full, 3));
+    const double flatFull = level (1.0f, 0.0f), flatHalf = level (0.5f, 0.0f);
+    check (std::abs (flatHalf / flatFull - 1.0) < 0.02, "0%: every velocity equally loud", juce::String (flatHalf / flatFull, 3));
+}
+
+void testEnvelope()
+{
+    std::cout << "envelope" << std::endl;
+    auto settled = [] (float sustainPct) {
+        Rig r;
+        r.set (seed::ids::decay, 200.0f);
+        r.set (seed::ids::sustain, sustainPct);
+        return toneAmp (tail (r.render (1.5, Rig::noteOn ({ 69 })), 0.4), 440.0);
+    };
+    const double peakAmp = settled (100.0f), sustained = settled (50.0f);
+    check (std::abs (sustained / peakAmp - 0.5) < 0.02, "decay settles at the sustain level (50%)", juce::String (sustained / peakAmp, 3));
+    Rig r;
+    r.set (seed::ids::decay, 200.0f);
+    r.set (seed::ids::sustain, 50.0f);
+    r.render (1.0, Rig::noteOn ({ 69 }));
+    r.set (seed::ids::sustain, 100.0f);
+    auto up = r.render (1.0);
+    check (toneAmp (tail (up, 0.3), 440.0) / peakAmp > 0.9, "raising sustain while held brings the level up (dynamic rule)");
+
+    Rig z;
+    z.set (seed::ids::sustain, 0.0f);
+    z.set (seed::ids::decay, 100.0f);
+    z.render (1.0, Rig::noteOn ({ 69 }));
+    check (z.proc->uiActiveVoices.load() == 0, "sustain 0: the note ends by itself while the key is held");
+}
+
 void snapshot (const juce::File& file)
 {
     SeedProcessor proc;
     proc.apvts.getParameter (seed::ids::seed)->setValueNotifyingHost (proc.apvts.getParameter (seed::ids::seed)->convertTo0to1 (2.5f));
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
-    juce::MessageManager::getInstance()->runDispatchLoopUntil (600); // let the animations settle
+    juce::MessageManager::getInstance()->runDispatchLoopUntil (900); // calculator + animations settle
     auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
     juce::FileOutputStream out (file);
     out.setPosition (0); out.truncate();
@@ -280,6 +371,9 @@ int main (int argc, char** argv)
     testKeys();
     testDrone();
     testState();
+    testCurve();
+    testVelocity();
+    testEnvelope();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")
             snapshot (juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]));

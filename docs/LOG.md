@@ -115,3 +115,5 @@ smoothing now snaps); "·" rendered as "Â·" (JUCE reads const char* as Latin-1
   step (403, see LESSONS). #5 green and published Release `build-5` (Seed v0.1.0).
   With the JUCE cache warm, configure takes ~30 s and the build ~10 min.
 - Run #6 = Seed v0.2.0, check-in scheduled for 08:01 UTC.
+- 08:01 check-in: run #6 (Seed v0.2.0) green on Windows incl. all 35 tests; Release `build-6`
+  published. Handed to user.

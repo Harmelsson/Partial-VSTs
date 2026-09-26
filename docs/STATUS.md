@@ -14,7 +14,8 @@ _Last updated: 2026-09-26 (session 1)_
   CalculatorViews (curve / partials / scale table), EnvelopeView; `dsp/` SafetyStage.
 - Pipeline: GitHub Actions builds Windows VST3 + standalone on every non-docs push, runs tests,
   publishes a GitHub **Release** `Build N` (front page → Releases). Run #2 = first green build;
-  Release `build-5` = v0.1.0; run #6 = v0.2.0 (was queued when last checked).
+  Release `build-5` = v0.1.0; **Release `build-6` = Seed v0.2.0** (green, 08:00 UTC):
+  https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-6
 
 ## User should test (Seed v0.2.0) — install guide: docs/TESTING.md
 1. Look & feel vs ArtHar. Scrub digits of Seed while a note is held: curve, table, partials and

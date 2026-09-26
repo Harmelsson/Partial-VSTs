@@ -74,3 +74,9 @@ builds live. Also: on note birth/death — "we will test out different ideas, th
 creating variety" → implement several as selectable modes.
 **Done:** CI publishes every successful build as a GitHub Release (front page → Releases box);
 TESTING.md rewritten accordingly. Windows CI run #1: configure OK (4.5 min), build in progress.
+
+## 2026-09-26 — session 1 — first green Windows build
+- CI run #2 succeeded (compile + SeedTests on Windows). Sent the user the run link (artifact).
+- Tried to download the artifact to send it directly: blocked by the container's proxy.
+- User asked whether the agent could build Windows itself faster → no (Linux container,
+  cross-compile untestable). Instead: docs-only pushes skip CI, superseded runs are cancelled.

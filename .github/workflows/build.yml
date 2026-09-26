@@ -5,7 +5,16 @@ name: build
 
 on:
   push:
+    # Docs-only changes don't need a 15-minute Windows build (or a new Release).
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
+
+# A newer push to the same branch cancels a still-running older build: only the latest matters.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write   # needed to create the Release

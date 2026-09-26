@@ -34,3 +34,11 @@ Format: **topic** — what happened → what to do instead. (date)
 - **User couldn't find the build** (2026-09-26): "Actions → Artifacts" is too hidden. Builds are now
   published as GitHub Releases (front page, right side). Windows CI timing: configure ~4.5 min
   (JUCE clone + juceaide), build with LTO ~10+ min.
+- **Agent can't fetch CI artifacts** (2026-09-26): the container's egress proxy blocks
+  `*.blob.core.windows.net`, so artifacts can't be downloaded here and re-sent to the user.
+  Give the user the run URL (Artifacts at the bottom) or rely on the Release.
+- **First Windows CI build: green on run #2** (~14 min: configure 4.5, build ~9). Docs-only pushes
+  are now skipped (`paths-ignore`) and superseded runs cancelled (`concurrency`).
+- **Cross-compiling Windows from Linux** was considered and rejected (unofficial toolchain, can't
+  test the result here). CI on a real Windows runner stays the source of user builds. Possible
+  speed-up later: Ninja + sccache in CI.

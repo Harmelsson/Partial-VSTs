@@ -9,7 +9,9 @@ _Last updated: 2026-09-26 (session 1)_
 - Pipeline: CMake + JUCE 8.0.15 (FetchContent). GitHub Actions (`.github/workflows/build.yml`)
   builds Windows VST3 + standalone, runs tests, uploads zip `PartialVSTs-windows-build-N`.
   CI now also publishes each green build as a **GitHub Release** `build-N` (front page → Releases),
-  starting with run #3. Runs #1/#2 were still building at time of writing — check results first.
+  starting with run #3. **Run #2 = first green Windows build** (artifact
+  PartialVSTs-windows-build-2, run https://github.com/Harmelsson/Partial-VSTs/actions/runs/36225275621).
+  Docs-only pushes no longer trigger builds.
 - `shared/`: `xen/Stretch.h` (copied math), `dsp/SafetyStage.h` (non-bypassable), `ui/` (theme,
   SmoothKnob, SmoothToggle).
 - Docs: CLAUDE.md, docs/{STATUS, LOG, LESSONS, IDEAS, TESTING, ARTHAR_REFERENCE, SEED_NOTE_LIFE}.

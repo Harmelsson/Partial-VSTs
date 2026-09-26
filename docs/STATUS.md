@@ -4,7 +4,11 @@ _Last updated: 2026-09-26 (session 1)_
 
 ## What exists
 - Workflow + docs only: `CLAUDE.md` (session protocol), `docs/` (STATUS, LOG, LESSONS, IDEAS).
-- **No code yet.** No JUCE project, no CI, no plugins.
+- **IN PROGRESS — Seed v0.1.0 + pipeline:** code written (CMake/JUCE 8.0.15, `shared/`,
+  `plugins/Seed/`, `tools/SeedTests.cpp`) but NOT yet compiled/tested. Next concrete steps:
+  build on Linux (`cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build`),
+  run `build/tools/SeedTests_artefacts/Release/SeedTests`, fix, then add the GitHub Actions
+  workflow + `docs/TESTING.md`, then hand over.
 - ArtHar calculator (Rust, `Harmelsson/arthar`, v1.0) reviewed → `docs/ARTHAR_REFERENCE.md`.
   Separate project; math is *copied* to C++ (`shared/xen/`), never linked.
 

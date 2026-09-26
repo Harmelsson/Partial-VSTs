@@ -122,20 +122,6 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterFloat> (L, ParameterID { ids::filterEnv, v3 }, "Filter env", NormalisableRange<float> (-8.0f, 8.0f, 0.0f), 0.0f, fmt (2, "oct"));
     add<AudioParameterFloat> (L, ParameterID { ids::filterDecay, v3 }, "Filter decay", skewed (1.0f, 5000.0f, 300.0f), 300.0f, fmt (0, "ms"));
 
-    // FX A: Partial Delay (only chosen partials go in; "spiral" re-pitches every repeat).
-    add<AudioParameterFloat> (L, ParameterID { ids::sendA, v3 }, "Delay send", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 0.0f, fmt (0, "%"));
-    add<AudioParameterChoice> (L, ParameterID { ids::ruleA, v3 }, "Delay picks", sendRuleNames(), 1);
-    add<AudioParameterFloat> (L, ParameterID { ids::delayTime, v3 }, "Delay time", skewed (1.0f, 2000.0f, 300.0f), 350.0f, fmt (0, "ms"));
-    add<AudioParameterFloat> (L, ParameterID { ids::delayFb, v3 }, "Delay feedback", NormalisableRange<float> (0.0f, 95.0f, 0.0f), 45.0f, fmt (0, "%"));
-    add<AudioParameterFloat> (L, ParameterID { ids::spiral, v3 }, "Delay spiral", NormalisableRange<float> (-1200.0f, 1200.0f, 0.0f), 0.0f, fmt (1, "c"));
-    add<AudioParameterFloat> (L, ParameterID { ids::delayLevel, v3 }, "Delay level", NormalisableRange<float> (-48.0f, 6.0f, 0.0f), 0.0f, fmt (1, "dB"));
-    // FX B: Rough Reverb (resonators on the scale's notes + beating twins).
-    add<AudioParameterFloat> (L, ParameterID { ids::sendB, v3 }, "Reverb send", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 0.0f, fmt (0, "%"));
-    add<AudioParameterChoice> (L, ParameterID { ids::ruleB, v3 }, "Reverb picks", sendRuleNames(), 0);
-    add<AudioParameterFloat> (L, ParameterID { ids::rvbDecay, v3 }, "Reverb decay", skewed (0.1f, 20.0f, 3.0f), 3.0f, fmt (2, "s"));
-    add<AudioParameterFloat> (L, ParameterID { ids::rough, v3 }, "Roughness", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 60.0f, fmt (0, "%"));
-    add<AudioParameterFloat> (L, ParameterID { ids::rvbLevel, v3 }, "Reverb level", NormalisableRange<float> (-48.0f, 6.0f, 0.0f), -6.0f, fmt (1, "dB"));
-
     // Chaos toys (v0.3.1).
     const int v31 = 4;
     add<AudioParameterInt> (L, ParameterID { ids::chordSize, v31 }, "Chord size", 1, 5, 1);
@@ -144,13 +130,73 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterFloat> (L, ParameterID { ids::wanderRate, v31 }, "Wander rate", skewed (0.02f, 20.0f, 1.0f), 0.5f, fmt (2, "Hz"));
     add<AudioParameterFloat> (L, ParameterID { ids::scramble, v31 }, "Loudness scramble", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 0.0f, fmt (0, "%"));
 
+    // ---- v0.5 ------------------------------------------------------------------------------
+    const int v5 = 6;
+    add<AudioParameterBool> (L, ParameterID { ids::shimmerSync, v5 }, "Shimmer sync (BPM)", false);
+    add<AudioParameterChoice> (L, ParameterID { ids::shimmerDiv, v5 }, "Shimmer division", syncDivNames(), 4);
+    add<AudioParameterBool> (L, ParameterID { ids::wanderSync, v5 }, "Wander sync (BPM)", false);
+    add<AudioParameterChoice> (L, ParameterID { ids::wanderDiv, v5 }, "Wander division", syncDivNames(), 2);
+
+    // FX rack: 5 slots, processed top to bottom. Default: delay, rough reverb, chirp reverb (all
+    // silent until their Mix is raised), a transparent Squash comp, and an empty slot.
+    const int defType[kNumFx] = { FxDelay, FxRough, FxChirp, FxSquash, FxOff };
+    const int defIn[kNumFx] = { 1, 1, 0, 0, 0 };
+    const float defPicks[kNumFx] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    const float defMix[kNumFx] = { 0.0f, 0.0f, 0.0f, 100.0f, 0.0f };
+    for (int sl = 1; sl <= kNumFx; ++sl)
+    {
+        const String P = "FX " + String (sl) + " ";
+        auto F = [sl] (const char* n) { return ids::fx (sl, n); };
+        add<AudioParameterChoice> (L, ParameterID { F ("type"), v5 }, P + "type", fxTypeNames(), defType[sl - 1]);
+        add<AudioParameterBool> (L, ParameterID { F ("on"), v5 }, P + "on", true);
+        add<AudioParameterChoice> (L, ParameterID { F ("in"), v5 }, P + "input", fxInputNames(), defIn[sl - 1]);
+        // Picks: a continuous morph over the pick rules (1.5 = halfway between Odd and Even).
+        add<AudioParameterFloat> (L, ParameterID { F ("picks"), v5 }, P + "picks",
+                                  NormalisableRange<float> (0.0f, (float) (sendRuleNames().size() - 1), 0.0f), defPicks[sl - 1],
+                                  AudioParameterFloatAttributes().withStringFromValueFunction ([] (float x, int) {
+                                      const auto& n = sendRuleNames();
+                                      const int i0 = juce::jlimit (0, n.size() - 1, (int) std::floor (x));
+                                      const float f = x - (float) i0;
+                                      if (f < 0.005f || i0 == n.size() - 1) return n[i0];
+                                      return n[i0] + " " + String (juce::roundToInt ((1.0f - f) * 100)) + "% / " + n[i0 + 1] + " " + String (juce::roundToInt (f * 100)) + "%";
+                                  }));
+        add<AudioParameterFloat> (L, ParameterID { F ("mix"), v5 }, P + "mix", NormalisableRange<float> (0.0f, 100.0f, 0.0f), defMix[sl - 1], fmt (1, "%"));
+        add<AudioParameterFloat> (L, ParameterID { F ("pan"), v5 }, P + "pan", NormalisableRange<float> (-100.0f, 100.0f, 0.0f), 0.0f, fmt (1, "%"));
+        add<AudioParameterFloat> (L, ParameterID { F ("width"), v5 }, P + "width", NormalisableRange<float> (0.0f, 200.0f, 0.0f), 100.0f, fmt (0, "%"));
+        // Partial Delay
+        add<AudioParameterFloat> (L, ParameterID { F ("dTime"), v5 }, P + "delay time", skewed (1.0f, 4000.0f, 300.0f), 350.0f, fmt (2, "ms"));
+        add<AudioParameterBool> (L, ParameterID { F ("dSync"), v5 }, P + "delay sync (BPM)", false);
+        add<AudioParameterChoice> (L, ParameterID { F ("dDiv"), v5 }, P + "delay division", syncDivNames(), 5);
+        add<AudioParameterFloat> (L, ParameterID { F ("dFb"), v5 }, P + "delay feedback", NormalisableRange<float> (0.0f, 95.0f, 0.0f), 45.0f, fmt (1, "%"));
+        add<AudioParameterFloat> (L, ParameterID { F ("dSpiral"), v5 }, P + "delay spiral", NormalisableRange<float> (-1200.0f, 1200.0f, 0.0f), 0.0f, fmt (2, "c"));
+        add<AudioParameterFloat> (L, ParameterID { F ("dPing"), v5 }, P + "delay ping-pong", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 100.0f, fmt (0, "%"));
+        add<AudioParameterFloat> (L, ParameterID { F ("dTone"), v5 }, P + "delay tone", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 80.0f, fmt (0, "%"));
+        // Rough Reverb
+        add<AudioParameterFloat> (L, ParameterID { F ("rDecay"), v5 }, P + "rough decay", skewed (0.1f, 20.0f, 3.0f), 3.0f, fmt (2, "s"));
+        add<AudioParameterFloat> (L, ParameterID { F ("rRough"), v5 }, P + "roughness", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 60.0f, fmt (1, "%"));
+        add<AudioParameterFloat> (L, ParameterID { F ("rDamp"), v5 }, P + "rough damping", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 40.0f, fmt (0, "%"));
+        // Chirp Reverb
+        add<AudioParameterFloat> (L, ParameterID { F ("cDecay"), v5 }, P + "chirp decay", skewed (0.1f, 20.0f, 3.0f), 2.5f, fmt (2, "s"));
+        add<AudioParameterFloat> (L, ParameterID { F ("cChirp"), v5 }, P + "chirp amount", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 60.0f, fmt (0, "%"));
+        add<AudioParameterFloat> (L, ParameterID { F ("cSize"), v5 }, P + "chirp size", skewed (10.0f, 300.0f, 60.0f), 60.0f, fmt (1, "ms"));
+        add<AudioParameterFloat> (L, ParameterID { F ("cDamp"), v5 }, P + "chirp damping", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 40.0f, fmt (0, "%"));
+        // Squash compressor
+        add<AudioParameterFloat> (L, ParameterID { F ("kThr"), v5 }, P + "squash threshold", NormalisableRange<float> (-60.0f, 0.0f, 0.0f), -18.0f, fmt (1, "dB"));
+        add<AudioParameterFloat> (L, ParameterID { F ("kSlope"), v5 }, P + "squash slope", NormalisableRange<float> (-1.0f, 1.0f, 0.0f), 1.0f, fmt (2, ""));
+        add<AudioParameterFloat> (L, ParameterID { F ("kAtt"), v5 }, P + "squash attack", skewed (0.05f, 200.0f, 10.0f), 10.0f, fmt (2, "ms"));
+        add<AudioParameterFloat> (L, ParameterID { F ("kRel"), v5 }, P + "squash release", skewed (1.0f, 2000.0f, 150.0f), 150.0f, fmt (1, "ms"));
+        add<AudioParameterFloat> (L, ParameterID { F ("kMake"), v5 }, P + "squash makeup", NormalisableRange<float> (0.0f, 24.0f, 0.0f), 0.0f, fmt (1, "dB"));
+    }
+
     // Modulators (random modifiers and friends).
     for (int m = 1; m <= kNumMods; ++m)
     {
         add<AudioParameterChoice> (L, ParameterID { ids::modShape (m), v3 }, "Mod " + String (m) + " shape", modShapeNames(), 5);
         add<AudioParameterFloat> (L, ParameterID { ids::modRate (m), v3 }, "Mod " + String (m) + " rate", skewed (0.01f, 20.0f, 1.0f), 0.3f, fmt (3, "Hz"));
-        add<AudioParameterFloat> (L, ParameterID { ids::modDepth (m), v3 }, "Mod " + String (m) + " depth", NormalisableRange<float> (-100.0f, 100.0f, 0.0f), 0.0f, fmt (0, "%"));
+        add<AudioParameterFloat> (L, ParameterID { ids::modDepth (m), v3 }, "Mod " + String (m) + " depth", NormalisableRange<float> (-100.0f, 100.0f, 0.0f), 0.0f, fmt (3, "%"));
         add<AudioParameterChoice> (L, ParameterID { ids::modTarget (m), v3 }, "Mod " + String (m) + " target", modTargetNames(), 0);
+        add<AudioParameterBool> (L, ParameterID { ids::modSync (m), 6 }, "Mod " + String (m) + " sync (BPM)", false);
+        add<AudioParameterChoice> (L, ParameterID { ids::modDiv (m), 6 }, "Mod " + String (m) + " division", syncDivNames(), 2);
     }
     return L;
 }

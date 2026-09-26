@@ -5,8 +5,9 @@ using namespace seed;
 
 // Mod target indices (must match modTargetNames()/modTargetIds() order in SeedParams.h).
 enum Tgt { T_None = 0, T_Seed, T_Fund, T_Rolloff, T_MinDip, T_Pitch, T_FShift, T_Tilt, T_OddEven, T_Spread,
-           T_Shimmer, T_FormFreq, T_FormGain, T_Noise, T_Cutoff, T_Reso, T_FilterEnv, T_SendA, T_DelayTime,
-           T_DelayFb, T_Spiral, T_SendB, T_RvbDecay, T_Rough, T_Magnet, T_Life, T_Glide, T_Gain, T_Wander, T_Scramble, T_Count };
+           T_Shimmer, T_FormFreq, T_FormGain, T_Noise, T_Cutoff, T_Reso, T_FilterEnv, T_Fx1Mix, T_Fx1Time,
+           T_Fx1Fb, T_Fx1Spiral, T_Fx2Mix, T_Fx2Decay, T_Fx2Rough, T_Magnet, T_Life, T_Glide, T_Gain, T_Wander, T_Scramble,
+           T_Fx1Picks, T_Fx2Picks, T_Fx3Mix, T_Fx3Picks, T_Fx4Mix, T_Fx5Mix, T_Count };
 
 SeedProcessor::SeedProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -43,8 +44,10 @@ SeedProcessor::SeedProcessor()
         mTarget[(size_t) m - 1] = apvts.getParameter (ids::modTarget (m));
         mods[(size_t) m - 1].reset ((uint32_t) (m * 7919));
     }
-    for (auto* id : modTargetIds())
-        targetParams.push_back (juce::String (id).isEmpty() ? nullptr : apvts.getParameter (id));
+    for (auto& id : modTargetIds())
+        targetParams.push_back (id.isEmpty() ? nullptr : apvts.getParameter (id));
+    for (int t = 1; t < (int) targetParams.size(); ++t)
+        if (targetParams[(size_t) t] != nullptr) targetOf[targetParams[(size_t) t]] = t;
     jassert ((int) targetParams.size() == T_Count);
     modOffset.assign ((size_t) T_Count, 0.0);
     for (auto& h : uiHeld) h.store (std::nanf (""));
@@ -66,11 +69,15 @@ void SeedProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     buildEngineParams (0.0);
     engine.setParams (ep);
     engine.prepare (sampleRate);
-    delay.prepare (sampleRate);
-    reverb.prepare (sampleRate);
+    for (auto& sl : fxSlots)
+    {
+        sl.delay.prepare (sampleRate); sl.rough.prepare (sampleRate); sl.chirp.prepare (sampleRate); sl.squash.prepare (sampleRate);
+        sl.lastType = -1;
+    }
     safety.prepare (sampleRate);
     const auto n = (size_t) std::max (samplesPerBlock, 1);
-    dryL.assign (n, 0.0f); dryR.assign (n, 0.0f); busA.assign (n, 0.0f); busB.assign (n, 0.0f);
+    dryL.assign (n, 0.0f); dryR.assign (n, 0.0f); wetL.assign (n, 0.0f); wetR.assign (n, 0.0f);
+    for (auto& b : partialBus) b.assign (n, 0.0f);
     droneSounding = -1;
 }
 
@@ -91,7 +98,11 @@ void SeedProcessor::buildEngineParams (double blockSeconds)
     for (int m = 0; m < kNumMods; ++m)
     {
         const int shape = (int) mShape[(size_t) m]->convertFrom0to1 (mShape[(size_t) m]->getValue());
-        const double rate = mRate[(size_t) m]->convertFrom0to1 (mRate[(size_t) m]->getValue());
+        // Hz, or synced to the host tempo (v0.5).
+        auto* syncP = P (ids::modSync (m + 1).toRawUTF8());
+        auto* divP = P (ids::modDiv (m + 1).toRawUTF8());
+        const double rate = syncP->getValue() > 0.5f ? (bpm / 60.0) / syncDivBeats ((int) std::lround (divP->convertFrom0to1 (divP->getValue())))
+                                                     : mRate[(size_t) m]->convertFrom0to1 (mRate[(size_t) m]->getValue());
         const double depth = mDepth[(size_t) m]->convertFrom0to1 (mDepth[(size_t) m]->getValue()) / 100.0;
         const int tgt = (int) mTarget[(size_t) m]->convertFrom0to1 (mTarget[(size_t) m]->getValue());
         const double v = mods[(size_t) m].advance (shape, rate, blockSeconds);
@@ -118,14 +129,19 @@ void SeedProcessor::buildEngineParams (double blockSeconds)
     ep.pitchCents = E (T_Pitch); ep.fshiftHz = E (T_FShift);
     ep.bendCents = bendNorm * V (ids::bendRange) * 100.0;
     ep.tiltDbOct = E (T_Tilt); ep.oddEven = E (T_OddEven) / 100.0; ep.spread = E (T_Spread) / 100.0;
-    ep.shimmer = E (T_Shimmer) / 100.0; ep.shimmerRate = V (ids::shimmerRate);
+    ep.shimmer = E (T_Shimmer) / 100.0; ep.shimmerRate = V (ids::shimmerSync) > 0.5 ? (bpm / 60.0) / syncDivBeats ((int) V (ids::shimmerDiv)) : V (ids::shimmerRate);
     ep.formFreq = E (T_FormFreq); ep.formGainDb = E (T_FormGain); ep.formWidth = V (ids::formWidth);
     ep.noiseDb = E (T_Noise);
     ep.filterMode = (int) V (ids::filterMode); ep.cutoff = E (T_Cutoff); ep.reso = E (T_Reso) / 100.0;
     ep.keyTrack = V (ids::keyTrack) / 100.0; ep.filterEnvOct = E (T_FilterEnv); ep.filterDecayMs = V (ids::filterDecay);
-    ep.sendA = E (T_SendA) / 100.0; ep.ruleA = (int) V (ids::ruleA);
-    ep.sendB = E (T_SendB) / 100.0; ep.ruleB = (int) V (ids::ruleB);
-    ep.wanderCents = E (T_Wander); ep.wanderRate = V (ids::wanderRate); ep.scramble = E (T_Scramble) / 100.0;
+    for (int sl = 1; sl <= kNumFx; ++sl)
+    {
+        const int type = (int) std::lround (fxValue (sl, "type"));
+        ep.busOn[(size_t) sl - 1] = type != FxOff && fxValue (sl, "on") > 0.5 && (int) std::lround (fxValue (sl, "in")) == 1;
+        ep.busPicks[(size_t) sl - 1] = fxValue (sl, "picks");
+    }
+    ep.wanderCents = E (T_Wander);
+    ep.wanderRate = V (ids::wanderSync) > 0.5 ? (bpm / 60.0) / syncDivBeats ((int) V (ids::wanderDiv)) : V (ids::wanderRate); ep.scramble = E (T_Scramble) / 100.0;
     chordSize = juce::jlimit (1, 5, (int) std::lround (V (ids::chordSize)));
     chordStep = juce::jlimit (1, 12, (int) std::lround (V (ids::chordStep)));
 }
@@ -190,7 +206,9 @@ void SeedProcessor::updateScaleOnAudioThread()
         hz[(size_t) i] = f;
     }
     if (count == 0) { hz[0] = ep.fundamentalHz; }
-    reverb.setTuning (hz.data(), std::max (1, count), eff (targetParams[T_Rough], T_Rough) / 100.0);
+    for (int sl = 1; sl <= kNumFx; ++sl)
+        if ((int) std::lround (fxValue (sl, "type")) == FxRough)
+            fxSlots[(size_t) sl - 1].rough.setTuning (hz.data(), std::max (1, count), fxValue (sl, "rRough") / 100.0);
 }
 
 // ================================================================================================
@@ -232,7 +250,15 @@ void SeedProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 {
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
-    if ((int) dryL.size() < n) { dryL.resize ((size_t) n); dryR.resize ((size_t) n); busA.resize ((size_t) n); busB.resize ((size_t) n); }
+    if ((int) dryL.size() < n)
+    {
+        dryL.resize ((size_t) n); dryR.resize ((size_t) n); wetL.resize ((size_t) n); wetR.resize ((size_t) n);
+        for (auto& b : partialBus) b.resize ((size_t) n);
+    }
+    // Host tempo for BPM-synced settings (120 if the host doesn't say).
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            if (auto hostBpm = pos->getBpm()) bpm = juce::jlimit (20.0, 999.0, *hostBpm);
 
     buildEngineParams (n / sampleRateHz);
     engine.setParams (ep);
@@ -240,7 +266,8 @@ void SeedProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     updateDrone();
 
     std::fill_n (dryL.begin(), n, 0.0f); std::fill_n (dryR.begin(), n, 0.0f);
-    std::fill_n (busA.begin(), n, 0.0f); std::fill_n (busB.begin(), n, 0.0f);
+    for (auto& b : partialBus) std::fill_n (b.begin(), n, 0.0f);
+    std::array<float*, kNumFx> busPtr {};
 
     int pos = 0;
     for (const auto meta : midi)
@@ -248,22 +275,19 @@ void SeedProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
         const int at = juce::jlimit (0, n, meta.samplePosition);
         if (at > pos)
         {
-            engine.render (dryL.data() + pos, dryR.data() + pos, busA.data() + pos, busB.data() + pos, at - pos);
+            for (int b = 0; b < kNumFx; ++b) busPtr[(size_t) b] = partialBus[(size_t) b].data() + pos;
+            engine.render (dryL.data() + pos, dryR.data() + pos, busPtr.data(), at - pos);
             pos = at;
         }
         handleMidi (meta.getMessage());
     }
-    if (pos < n) engine.render (dryL.data() + pos, dryR.data() + pos, busA.data() + pos, busB.data() + pos, n - pos);
+    if (pos < n)
+    {
+        for (int b = 0; b < kNumFx; ++b) busPtr[(size_t) b] = partialBus[(size_t) b].data() + pos;
+        engine.render (dryL.data() + pos, dryR.data() + pos, busPtr.data(), n - pos);
+    }
 
-    // FX on the send buses (they only contain the partials each send picked).
-    pvst::PartialDelay::Params dp;
-    dp.timeMs = eff (targetParams[T_DelayTime], T_DelayTime);
-    dp.feedback = eff (targetParams[T_DelayFb], T_DelayFb) / 100.0;
-    dp.spiralCents = eff (targetParams[T_Spiral], T_Spiral);
-    dp.level = juce::Decibels::decibelsToGain ((double) P (ids::delayLevel)->convertFrom0to1 (P (ids::delayLevel)->getValue()));
-    delay.process (busA.data(), dryL.data(), dryR.data(), n, dp);
-    reverb.process (busB.data(), dryL.data(), dryR.data(), n, eff (targetParams[T_RvbDecay], T_RvbDecay),
-                    juce::Decibels::decibelsToGain ((double) P (ids::rvbLevel)->convertFrom0to1 (P (ids::rvbLevel)->getValue())));
+    processRack (n);
 
     buffer.copyFrom (0, 0, dryL.data(), n);
     if (buffer.getNumChannels() > 1) buffer.copyFrom (1, 0, dryR.data(), n);
@@ -378,7 +402,8 @@ void SeedProcessor::randomizeOne (juce::RangedAudioParameter& rp, double amount,
     if (rp.getNumSteps() < 30 && amount < 1.0 && r.nextFloat() > amount * 0.5) next = cur; // choices change rarely
     // Keep a few things sane: noise mostly off, feedback not pinned at max, some partials.
     if (id == ids::noise) next = std::min (next, rp.convertTo0to1 (-18.0f));
-    if (id == ids::delayFb) next = std::min (next, rp.convertTo0to1 (85.0f));
+    if (id.endsWith ("dFb")) next = std::min (next, rp.convertTo0to1 (85.0f));
+    if (id.endsWith ("mix") && id.startsWith ("fx")) next = std::min (next, rp.convertTo0to1 (70.0f)); // keep dry audible
     if (id == ids::partials) next = std::max (next, rp.convertTo0to1 (4.0f));
     rp.setValueNotifyingHost (next);
 }
@@ -458,6 +483,106 @@ void SeedProcessor::initAll()
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p)) rp->setValueNotifyingHost (rp->getDefaultValue());
     currentPresetName = {};
+}
+
+// ================================================================================================
+// FX rack (v0.5)
+// ================================================================================================
+double SeedProcessor::fxValue (int slot, const char* name) const
+{
+    auto* p = apvts.getParameter (ids::fx (slot, name));
+    const auto it = targetOf.find (p);
+    return it != targetOf.end() ? eff (p, it->second) : (double) p->convertFrom0to1 (p->getValue());
+}
+
+/// Top to bottom. A slot reads either the CHAIN (the sound so far) or its own PARTIAL BUS (only
+/// the partials it picks, straight from the synth). Chain slots blend wet into the chain by Mix;
+/// partial slots ADD their wet (the picked partials are already in the dry sound). Pan / width
+/// shape the wet signal.
+void SeedProcessor::processRack (int n)
+{
+    for (int sl = 1; sl <= kNumFx; ++sl)
+    {
+        auto& fx = fxSlots[(size_t) sl - 1];
+        const int type = (int) std::lround (fxValue (sl, "type"));
+        if (type != fx.lastType)
+        {
+            fx.delay.reset(); fx.rough.reset(); fx.chirp.reset(); fx.squash.reset(); // no stale tails
+            fx.lastType = type;
+        }
+        if (type == FxOff || fxValue (sl, "on") < 0.5) continue;
+        const bool partials = (int) std::lround (fxValue (sl, "in")) == 1;
+        const float* inL = partials ? partialBus[(size_t) sl - 1].data() : dryL.data();
+        const float* inR = partials ? partialBus[(size_t) sl - 1].data() : dryR.data();
+        switch (type)
+        {
+            case FxDelay:
+            {
+                pvst::PartialDelay::Params dp;
+                dp.timeMs = fxValue (sl, "dSync") > 0.5 ? syncDivBeats ((int) std::lround (fxValue (sl, "dDiv"))) * 60000.0 / bpm : fxValue (sl, "dTime");
+                dp.feedback = fxValue (sl, "dFb") / 100.0;
+                dp.spiralCents = fxValue (sl, "dSpiral");
+                dp.pingPong = fxValue (sl, "dPing") / 100.0;
+                dp.tone = fxValue (sl, "dTone") / 100.0;
+                fx.delay.process (inL, inR, wetL.data(), wetR.data(), n, dp);
+                break;
+            }
+            case FxRough:
+                fx.rough.process (inL, inR, wetL.data(), wetR.data(), n, fxValue (sl, "rDecay"), fxValue (sl, "rDamp") / 100.0);
+                break;
+            case FxChirp:
+            {
+                pvst::ChirpReverb::Params cp;
+                cp.decaySec = fxValue (sl, "cDecay"); cp.chirp = fxValue (sl, "cChirp") / 100.0;
+                cp.sizeMs = fxValue (sl, "cSize"); cp.damping = fxValue (sl, "cDamp") / 100.0;
+                fx.chirp.process (inL, inR, wetL.data(), wetR.data(), n, cp);
+                break;
+            }
+            case FxSquash:
+            {
+                pvst::SquashCompressor::Params kp;
+                kp.thresholdDb = fxValue (sl, "kThr"); kp.slope = fxValue (sl, "kSlope");
+                kp.attackMs = fxValue (sl, "kAtt"); kp.releaseMs = fxValue (sl, "kRel"); kp.makeupDb = fxValue (sl, "kMake");
+                fx.squash.process (inL, inR, wetL.data(), wetR.data(), n, kp);
+                break;
+            }
+            default: continue;
+        }
+        const float mix = (float) juce::jlimit (0.0, 1.0, fxValue (sl, "mix") / 100.0);
+        const float pan = (float) juce::jlimit (-1.0, 1.0, fxValue (sl, "pan") / 100.0);
+        const float width = (float) juce::jlimit (0.0, 2.0, fxValue (sl, "width") / 100.0);
+        const float gL = pan > 0.0f ? 1.0f - pan : 1.0f, gR = pan < 0.0f ? 1.0f + pan : 1.0f;
+        for (int i = 0; i < n; ++i)
+        {
+            // Width on the wet signal (mid/side), then balance.
+            const float m = 0.5f * (wetL[(size_t) i] + wetR[(size_t) i]);
+            const float sd = 0.5f * (wetL[(size_t) i] - wetR[(size_t) i]) * width;
+            const float l = (m + sd) * gL, r = (m - sd) * gR;
+            if (partials) { dryL[(size_t) i] += mix * l; dryR[(size_t) i] += mix * r; }
+            else
+            {
+                dryL[(size_t) i] = dryL[(size_t) i] * (1.0f - mix) + mix * l;
+                dryR[(size_t) i] = dryR[(size_t) i] * (1.0f - mix) + mix * r;
+            }
+        }
+    }
+}
+
+void SeedProcessor::swapFxSlots (int a, int b)
+{
+    if (a == b || a < 1 || b < 1 || a > kNumFx || b > kNumFx) return;
+    const juce::String pa = "fx" + juce::String (a), pb = "fx" + juce::String (b);
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+        {
+            const auto id = rp->getParameterID();
+            if (! id.startsWith (pa) || id.substring (pa.length(), pa.length() + 1).containsOnly ("0123456789")) continue;
+            auto* other = apvts.getParameter (pb + id.substring (pa.length()));
+            if (other == nullptr) continue;
+            const float va = rp->getValue(), vb = other->getValue();
+            rp->setValueNotifyingHost (vb);
+            other->setValueNotifyingHost (va);
+        }
 }
 
 // ================================================================================================

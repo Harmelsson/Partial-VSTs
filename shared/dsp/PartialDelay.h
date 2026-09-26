@@ -1,12 +1,14 @@
 #pragma once
-// PartialDelay — a ping-pong delay meant to be fed only SOME partials of a sound (the synth's send
-// bus picks them: odd, even, high half...). Creative twist: SPIRAL re-pitches every repeat by
-// `spiralCents` (a two-tap "doppler" pitch shifter inside the feedback loop), so echoes climb or
-// fall like a barber-pole.
+// PartialDelay — a ping-pong delay meant to be fed only SOME partials of a sound (the synth's
+// per-slot partial bus picks them: odd, even, a morph between them...). Creative twist: SPIRAL
+// re-pitches every repeat by `spiralCents` (a two-tap "doppler" pitch shifter inside the feedback
+// loop), so echoes climb or fall like a barber-pole.
 //
-// Safety: feedback is capped (95%) and soft-clipped (tanh) inside the loop, so even extreme
-// settings can't run away; the plugin's SafetyStage is still the final guard.
-// Changing the delay time glides the read head (tape-style), never clicks.
+// v0.5: stereo in, writes (replaces) a stereo WET signal; ping-pong amount; tone (low-pass in the
+// feedback loop, so repeats get darker).
+// Safety: feedback is capped (95%) and soft-clipped (tanh) inside the loop; the plugin's
+// SafetyStage is still the final guard. Changing the time glides the read head (tape-style).
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -17,31 +19,34 @@ class PartialDelay
 public:
     struct Params
     {
-        double timeMs = 350.0, feedback = 0.45, spiralCents = 0.0, level = 1.0;
+        double timeMs = 350.0, feedback = 0.45, spiralCents = 0.0;
+        double pingPong = 1.0;  // 0 = straight stereo echoes, 1 = full ping-pong
+        double tone = 1.0;      // 0 = very dark repeats, 1 = bright
     };
 
     void prepare (double sampleRate)
     {
         sr = sampleRate;
-        size = (int) (sr * 2.6) + 8;
+        size = (int) (sr * 4.2) + 8; // up to 4 s (e.g. 1 bar at 60 BPM)
         bufL.assign ((size_t) size, 0.0f);
         bufR.assign ((size_t) size, 0.0f);
         write = 0;
         delaySm = 0.35 * sr;
         phase = 0.0;
+        lpL = lpR = 0.0f;
         timeCoef = std::exp (-1.0 / (0.08 * sr));
     }
 
-    void reset() { std::fill (bufL.begin(), bufL.end(), 0.0f); std::fill (bufR.begin(), bufR.end(), 0.0f); }
+    void reset() { std::fill (bufL.begin(), bufL.end(), 0.0f); std::fill (bufR.begin(), bufR.end(), 0.0f); lpL = lpR = 0.0f; }
 
-    /// Mono in, ADDS stereo out.
-    void process (const float* in, float* outL, float* outR, int n, const Params& p)
+    void process (const float* inL, const float* inR, float* wetL, float* wetR, int n, const Params& p)
     {
         const double targetDelay = std::clamp (p.timeMs * 0.001 * sr, 1.0, (double) size - kWindow - 4.0);
         const double ratio = std::exp2 (p.spiralCents / 1200.0);
         const bool shifting = std::abs (p.spiralCents) > 0.05;
         const float fb = (float) std::clamp (p.feedback, 0.0, 0.95);
-        const float lvl = (float) p.level;
+        const float pp = (float) std::clamp (p.pingPong, 0.0, 1.0);
+        const float lpA = (float) (0.05 + 0.95 * std::clamp (p.tone, 0.0, 1.0)); // one-pole in the loop
         for (int i = 0; i < n; ++i)
         {
             delaySm = targetDelay + (delaySm - targetDelay) * timeCoef;
@@ -61,12 +66,18 @@ public:
                 rl = read (bufL, delaySm);
                 rr = read (bufR, delaySm);
             }
-            // Ping-pong: input enters left, repeats bounce L -> R -> L.
-            bufL[(size_t) write] = std::tanh (in[i] + fb * rr);
-            bufR[(size_t) write] = std::tanh (fb * rl);
+            lpL += lpA * (rl - lpL);
+            lpR += lpA * (rr - lpR);
+            // Ping-pong: the input enters left (mono sum); repeats bounce L -> R -> L. With pp = 0
+            // each side feeds itself (plain stereo echoes).
+            const float mono = 0.5f * (inL[i] + inR[i]);
+            const float inAL = pp * mono + (1.0f - pp) * inL[i];
+            const float inAR = (1.0f - pp) * inR[i];
+            bufL[(size_t) write] = std::tanh (inAL + fb * (pp * lpR + (1.0f - pp) * lpL));
+            bufR[(size_t) write] = std::tanh (inAR + fb * (pp * lpL + (1.0f - pp) * lpR));
             write = (write + 1) % size;
-            outL[i] += lvl * rl;
-            outR[i] += lvl * rr;
+            wetL[i] = rl;
+            wetR[i] = rr;
         }
     }
 
@@ -85,6 +96,7 @@ private:
 
     double sr = 48000.0, delaySm = 0.0, phase = 0.0, timeCoef = 0.999;
     std::vector<float> bufL, bufR;
+    float lpL = 0.0f, lpR = 0.0f;
     int size = 1, write = 0;
 };
 } // namespace pvst

@@ -61,3 +61,8 @@ Format: **topic** — what happened → what to do instead. (date)
   mouseDoubleClick and added custom notes. Record the button in mouseDown and only act on left.
 - **User preferences can flip quickly** (2026-09-26): the 12-keys mode was requested and withdrawn
   within one turn. Build big features in separable pieces so they can be removed cleanly.
+- **Slicing code by "from marker A to marker B" deletes whatever sits between them** (2026-09-26):
+  removing the old FX params also removed the chord/wander/scramble params → null-pointer crash in
+  tests. After any bulk edit of the parameter layout, grep that every expected ID still exists.
+- **Smoothed parameters need settle time in tests** (picks glides ~30 ms): render a warm-up block
+  after setting params before measuring.

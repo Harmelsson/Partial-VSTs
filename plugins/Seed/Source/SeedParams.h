@@ -15,7 +15,7 @@
 
 namespace seed
 {
-inline constexpr const char* kVersion = "0.4.0";
+inline constexpr const char* kVersion = "0.5.0";
 
 namespace ids
 {
@@ -62,23 +62,17 @@ namespace ids
     inline constexpr const char* keyTrack = "keyTrack";
     inline constexpr const char* filterEnv = "filterEnv";
     inline constexpr const char* filterDecay = "filterDecay";
-    inline constexpr const char* sendA = "sendA";
-    inline constexpr const char* ruleA = "ruleA";
-    inline constexpr const char* delayTime = "delayTime";
-    inline constexpr const char* delayFb = "delayFb";
-    inline constexpr const char* spiral = "spiral";
-    inline constexpr const char* delayLevel = "delayLevel";
-    inline constexpr const char* sendB = "sendB";
-    inline constexpr const char* ruleB = "ruleB";
-    inline constexpr const char* rvbDecay = "rvbDecay";
-    inline constexpr const char* rough = "rough";
-    inline constexpr const char* rvbLevel = "rvbLevel";
     // v0.3.1 — chaos toys
     inline constexpr const char* chordSize = "chordSize";
     inline constexpr const char* chordStep = "chordStep";
     inline constexpr const char* wander = "wander";
     inline constexpr const char* wanderRate = "wanderRate";
     inline constexpr const char* scramble = "scramble";
+    // v0.5 — tempo sync for time-based settings (Hz or BPM)
+    inline constexpr const char* shimmerSync = "shimmerSync";
+    inline constexpr const char* shimmerDiv = "shimmerDiv";
+    inline constexpr const char* wanderSync = "wanderSync";
+    inline constexpr const char* wanderDiv = "wanderDiv";
 
     // Generated per-item IDs.
     inline juce::String partialLevel (int n) { return "p" + juce::String (n) + "lvl"; }   // n = 1..64
@@ -92,6 +86,10 @@ namespace ids
     inline juce::String customNoteCents (int k) { return "cn" + juce::String (k) + "c"; }
     inline juce::String partialInScale (int n) { return "p" + juce::String (n) + "scl"; }       // n = 2..64 (v0.4)
     inline juce::String customPartialInScale (int k) { return "cp" + juce::String (k) + "scl"; } // k = 1..8 (v0.4)
+    inline juce::String modSync (int m) { return "mod" + juce::String (m) + "sync"; }  // v0.5
+    inline juce::String modDiv (int m) { return "mod" + juce::String (m) + "div"; }    // v0.5
+    /// FX rack slot parameter (v0.5): fx(2, "mix") -> "fx2mix". Slots 1..kNumFx.
+    inline juce::String fx (int slot, const char* name) { return "fx" + juce::String (slot) + name; }
     inline juce::String modShape (int m) { return "mod" + juce::String (m) + "shape"; }    // m = 1..4
     inline juce::String modRate (int m) { return "mod" + juce::String (m) + "rate"; }
     inline juce::String modDepth (int m) { return "mod" + juce::String (m) + "depth"; }
@@ -99,6 +97,36 @@ namespace ids
 } // namespace ids
 
 inline constexpr int kNumMods = 4;
+inline constexpr int kNumFx = 5;
+
+// FX rack (v0.5). Slot parameter names (appended to "fx<slot>"):
+//   common : type, on, in (Chain/Partials), picks (morph over sendRuleNames), mix, pan, width
+//   delay  : dTime (ms), dSync, dDiv, dFb, dSpiral, dPing, dTone
+//   rough  : rDecay, rRough, rDamp        chirp: cDecay, cChirp, cSize, cDamp
+//   squash : kThr, kSlope, kAtt, kRel, kMake
+enum FxType { FxOff = 0, FxDelay, FxRough, FxChirp, FxSquash };
+inline const juce::StringArray& fxTypeNames()
+{
+    static const juce::StringArray a { "Off", "Partial Delay", "Rough Reverb", "Chirp Reverb", "Squash Comp" };
+    return a;
+}
+inline const juce::StringArray& fxInputNames()
+{
+    static const juce::StringArray a { "Chain", "Partials" };
+    return a;
+}
+/// Tempo divisions for BPM sync, and their length in beats.
+inline const juce::StringArray& syncDivNames()
+{
+    static const juce::StringArray a { "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/8", "1/16", "1/32",
+                                       "1/2 dot", "1/4 dot", "1/8 dot", "1/2 trip", "1/4 trip", "1/8 trip", "1/16 trip" };
+    return a;
+}
+inline double syncDivBeats (int i)
+{
+    static const double b[] = { 16, 8, 4, 2, 1, 0.5, 0.25, 0.125, 3, 1.5, 0.75, 4.0 / 3.0, 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0 };
+    return b[std::clamp (i, 0, 14)];
+}
 
 inline const juce::StringArray& keyModeNames()
 {
@@ -127,19 +155,23 @@ inline const juce::StringArray& modTargetNames()
 {
     static const juce::StringArray a { "None", "Seed", "Fundamental", "Rolloff", "Min dip", "Pitch", "Freq shift",
                                        "Tilt", "Odd/Even", "Spread", "Shimmer", "Formant freq", "Formant gain",
-                                       "Noise", "Cutoff", "Resonance", "Filter env", "Send A", "Delay time",
-                                       "Delay fb", "Spiral", "Send B", "Rvb decay", "Roughness", "Magnet",
-                                       "Life", "Glide", "Gain", "Wander", "Scramble" };
+                                       "Noise", "Cutoff", "Resonance", "Filter env", "FX1 mix", "FX1 delay time",
+                                       "FX1 feedback", "FX1 spiral", "FX2 mix", "FX2 decay", "FX2 roughness", "Magnet",
+                                       "Life", "Glide", "Gain", "Wander", "Scramble", "FX1 picks", "FX2 picks",
+                                       "FX3 mix", "FX3 picks", "FX4 mix", "FX5 mix" };
     return a;
 }
-inline const std::vector<const char*>& modTargetIds()
+/// Parameter IDs for the modulation targets, aligned with modTargetNames() ("" = none).
+inline const juce::StringArray& modTargetIds()
 {
-    static const std::vector<const char*> v { "", ids::seed, ids::fundamental, ids::rolloff, ids::minDip, ids::pitch,
-                                              ids::fshift, ids::tilt, ids::oddEven, ids::spread, ids::shimmer,
-                                              ids::formFreq, ids::formGain, ids::noise, ids::cutoff, ids::reso,
-                                              ids::filterEnv, ids::sendA, ids::delayTime, ids::delayFb, ids::spiral,
-                                              ids::sendB, ids::rvbDecay, ids::rough, ids::magnet, ids::life,
-                                              ids::glide, ids::gain, ids::wander, ids::scramble };
+    static const juce::StringArray v { "", ids::seed, ids::fundamental, ids::rolloff, ids::minDip, ids::pitch,
+                                       ids::fshift, ids::tilt, ids::oddEven, ids::spread, ids::shimmer,
+                                       ids::formFreq, ids::formGain, ids::noise, ids::cutoff, ids::reso,
+                                       ids::filterEnv, ids::fx (1, "mix"), ids::fx (1, "dTime"), ids::fx (1, "dFb"),
+                                       ids::fx (1, "dSpiral"), ids::fx (2, "mix"), ids::fx (2, "rDecay"), ids::fx (2, "rRough"),
+                                       ids::magnet, ids::life, ids::glide, ids::gain, ids::wander, ids::scramble,
+                                       ids::fx (1, "picks"), ids::fx (2, "picks"), ids::fx (3, "mix"), ids::fx (3, "picks"),
+                                       ids::fx (4, "mix"), ids::fx (5, "mix") };
     return v;
 }
 

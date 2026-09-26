@@ -177,3 +177,25 @@ edits clears ticks + calculator-aimed mods. Window 1200×880. 66/66 checks.
 **Answered in chat:** Seed-12, Magnet, Bend range, Chord size/step, Mutate.
 - 14:44 check-in: CI run #10 (Seed v0.4.0) green incl. 66 tests; Release `build-10` published.
   (Note: the GitHub MCP release list sorts by tag name, so build-10 appears after build-5.)
+
+## 2026-09-26 — session 1 — user tested v0.4.0 (build 10) → v0.5 requests
+**User:** "feels really good to my ears". Feedback: release doesn't fade, it cuts off instantly
+("something is in bad mojo"); show every scale type on the curve + the 12-EDO octave when on
+Seed-12 (to see the deviation); FX "Picks" should be scrollable/continuous (between Odd and Even
+= 50/50); loves the FX, wants more settings (panning…), more partial-FX ideas, an FX RACK with a
+top-to-bottom chain whose slots can be swapped; compressors + other reverb types (experimental,
+characteristic, simple); later learn about distortion types; everything automatable; Hz AND BPM
+for every time-based setting; mod depth 2 more decimals (seed mod at 1% is drastic); import /
+export scales, and maybe derive fitting partials for an imported scale (consonance / beating).
+**Phase 1–2 done (v0.5.0 WIP):** release: headless release measured clean (smooth −60 dB fade), but
+re-pressing a key re-used its still-releasing voice and cut the tail instantly → releasing voices
+are no longer re-used (most likely what the user heard; ask to confirm). FX RACK: 5 slots top to
+bottom, per slot type (Off / Partial Delay / Rough Reverb / Chirp Reverb (new, dispersive
+all-pass spring tank) / Squash Comp (new, slope past ∞:1 into over-compression)), on, input
+(Chain / Partials = per-slot partial bus from the engine), Picks = continuous morph between pick
+rules (smoothed), mix, pan, width; ▲▼ swap slots (swaps parameter values). Delay gained
+ping-pong, tone, BPM sync. BPM (host tempo) sync for modulators, shimmer, wander, delay.
+Mod depth 3 decimals. Mod targets re-pointed to rack params (+ picks). Old sendA/ruleA/… params
+removed (only in the user's test projects). 76/76 checks.
+**Failure along the way:** a python replace that cut the old FX block also deleted the chaos-toys
+params sitting after it → test crash (null param). Restored from git. Lesson added.

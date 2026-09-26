@@ -6,10 +6,12 @@
 //   SYNTH:      SeedEngine (voices), FX (Partial Delay, Rough Reverb), modulators, safety stage.
 // Also: presets (All / Tuning / Sound), Dice / Mutate, and state save/load.
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <unordered_map>
 
 #include "SeedEngine.h"
 #include "SeedParams.h"
 #include "dsp/Modulator.h"
+#include "dsp/ChirpReverb.h"
 #include "dsp/PartialDelay.h"
 #include "dsp/RoughReverb.h"
 #include "dsp/SafetyStage.h"
@@ -79,6 +81,10 @@ public:
     void resetCalculatorEdits();
     /// Everything back to defaults (a fresh Seed).
     void initAll();
+    /// Swap two FX rack slots (all their settings); used by the ▲▼ buttons.
+    void swapFxSlots (int a, int b);
+    /// Host tempo (for the UI).
+    double currentBpm() const { return bpm; }
 
     // ---- For the UI -----------------------------------------------------------------------------
     std::atomic<int> uiActiveVoices { 0 };
@@ -98,12 +104,26 @@ private:
     // Engine + FX + safety.
     seed::Engine engine;
     seed::EngineParams ep;
-    pvst::PartialDelay delay;
-    pvst::RoughReverb reverb;
+    // FX rack: every slot owns one of each effect, so switching a slot's type is instant.
+    struct FxSlot
+    {
+        pvst::PartialDelay delay;
+        pvst::RoughReverb rough;
+        pvst::ChirpReverb chirp;
+        pvst::SquashCompressor squash;
+        int lastType = -1;
+    };
+    std::array<FxSlot, seed::kNumFx> fxSlots;
+    std::array<std::vector<float>, seed::kNumFx> partialBus;
+    std::vector<float> wetL, wetR;
+    double bpm = 120.0;
+    void processRack (int n);
+    double fxValue (int slot, const char* name) const;   // plain value, modulation applied
+    std::unordered_map<const juce::RangedAudioParameter*, int> targetOf; // param -> mod target index
     pvst::SafetyStage safety;
     std::array<pvst::Modulator, seed::kNumMods> mods;
     std::vector<double> modOffset;                 // per target index, normalised units
-    std::vector<float> dryL, dryR, busA, busB;
+    std::vector<float> dryL, dryR;
     int droneSounding = -1;
     double bendNorm = 0.0;                          // pitch wheel, -1..1
     int chordSize = 1, chordStep = 2;

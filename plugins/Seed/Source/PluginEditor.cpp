@@ -65,9 +65,11 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
 
     // ---- Chaos + reset ----------------------------------------------------------------------
     diceTuning.onClick = [this] { proc.randomize (SeedProcessor::Scope::Tuning, 1.0); };
-    dicePage.onClick = [this] { proc.randomizeParams (pageIds[(size_t) currentTab], 1.0); };
-    mutatePage.onClick = [this] { proc.randomizeParams (pageIds[(size_t) currentTab], 0.15); };
-    resetPage.onClick = [this] { proc.resetParams (pageIds[(size_t) currentTab]); };
+    // The FX page's buttons act on the selected rack slot.
+    auto idsOfPage = [this] { return currentTab == 4 && fxRack != nullptr ? fxRack->pageIds() : pageIds[(size_t) currentTab]; };
+    dicePage.onClick = [this, idsOfPage] { proc.randomizeParams (idsOfPage(), 1.0); };
+    mutatePage.onClick = [this, idsOfPage] { proc.randomizeParams (idsOfPage(), 0.15); };
+    resetPage.onClick = [this, idsOfPage] { proc.resetParams (idsOfPage()); };
     initAll.onClick = [this] { proc.initAll(); refreshPresetLabel(); };
     // Every hand edit, Scale tick and calculator-aimed modulation goes; core settings stay.
     resetEdits.onClick = [this] { proc.resetCalculatorEdits(); };
@@ -80,7 +82,7 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
     buildPages();
     showTab (0);
 
-    setSize (1200, 880);
+    setSize (1200, 900);
     lastTick = juce::Time::getMillisecondCounterHiRes();
     timerCallback();
     startTimerHz (60);
@@ -277,6 +279,8 @@ void SeedEditor::buildPages()
     box (timbre, ids::spread, "Stereo spread (%)", 3, 0, 5.0, 120);
     box (timbre, ids::shimmer, "Shimmer (%)", 3, 0, 5.0);
     box (timbre, ids::shimmerRate, "Shimmer (Hz)", 2, 2, 0.1);
+    seg (timbre, ids::shimmerSync, "Shimmer rate", { "Hz", "BPM" }, 90);
+    choice (timbre, ids::shimmerDiv, "Shimmer div", syncDivNames(), 90);
     box (timbre, ids::formFreq, "Formant (Hz)", 5, 0, 10.0, 112);
     box (timbre, ids::formGain, "Formant (dB)", 2, 1, 1.0);
     timbre.newLine();
@@ -285,6 +289,8 @@ void SeedEditor::buildPages()
     caption (timbre, "CHAOS (synth only)", 150);
     box (timbre, ids::wander, "Wander (c)", 3, 1, 5.0);
     box (timbre, ids::wanderRate, "Wander (Hz)", 2, 2, 0.1);
+    seg (timbre, ids::wanderSync, "Wander rate", { "Hz", "BPM" }, 90);
+    choice (timbre, ids::wanderDiv, "Wander div", syncDivNames(), 90);
     box (timbre, ids::scramble, "Scramble (%)", 3, 0, 5.0);
 
     auto& filt = pages[3];
@@ -298,33 +304,27 @@ void SeedEditor::buildPages()
     box (filt, ids::noise, "Noise (dB)", 2, 1, 1.0);
 
     auto& fx = pages[4];
-    caption (fx, "PARTIAL DELAY  (only the partials it picks)", 150);
-    box (fx, ids::sendA, "Send (%)", 3, 0, 5.0, 90);
-    choice (fx, ids::ruleA, "Picks", sendRuleNames(), 120);
-    box (fx, ids::delayTime, "Time (ms)", 4, 0, 10.0, 96);
-    box (fx, ids::delayFb, "Feedback (%)", 2, 0, 5.0, 96);
-    box (fx, ids::spiral, "Spiral (c/repeat)", 4, 1, 50.0, 124);
-    box (fx, ids::delayLevel, "Level (dB)", 2, 1, 1.0, 96);
-    fx.newLine();
-    caption (fx, "ROUGH REVERB  (rings on the scale, twins beat)", 150);
-    box (fx, ids::sendB, "Send (%)", 3, 0, 5.0, 90);
-    choice (fx, ids::ruleB, "Picks", sendRuleNames(), 120);
-    box (fx, ids::rvbDecay, "Decay (s)", 2, 2, 0.5, 96);
-    box (fx, ids::rough, "Roughness (%)", 3, 0, 5.0, 110);
-    box (fx, ids::rvbLevel, "Level (dB)", 2, 1, 1.0, 96);
+    {
+        auto rack = std::make_unique<FxRackView> (proc);
+        fxRack = rack.get();
+        fx.fill (*rack);
+        owned.push_back (std::move (rack));
+    }
 
     auto& mod = pages[5];
     for (int m = 1; m <= kNumMods; ++m)
     {
-        choice (mod, ids::modShape (m), "Mod " + juce::String (m) + " shape", modShapeNames(), 104);
-        box (mod, ids::modRate (m), "Rate (Hz)", 2, 3, 0.1, 92);
-        box (mod, ids::modDepth (m), "Depth (%)", 3, 0, 5.0, 84);
-        choice (mod, ids::modTarget (m), "Target", modTargetNames(), 118);
+        choice (mod, ids::modShape (m), "Mod " + juce::String (m) + " shape", modShapeNames(), 110);
+        seg (mod, ids::modSync (m), "Rate in", { "Hz", "BPM" }, 90);
+        box (mod, ids::modRate (m), "Rate (Hz)", 2, 3, 0.1, 104);
+        choice (mod, ids::modDiv (m), "Division", syncDivNames(), 96);
+        box (mod, ids::modDepth (m), "Depth (%)", 3, 3, 0.1, 124); // 3 decimals: seed moves are drastic
+        choice (mod, ids::modTarget (m), "Target", modTargetNames(), 130);
         auto meter = std::make_unique<ModMeter> (proc.uiModValue[(size_t) m - 1]);
         meters.push_back (meter.get());
         mod.add (*meter, 44);
         owned.push_back (std::move (meter));
-        if (m % 2 == 0) mod.newLine();
+        mod.newLine();
     }
 }
 
@@ -400,6 +400,7 @@ void SeedEditor::timerCallback()
     partialsPlot.tick (dt);
     if (envelopeView != nullptr && currentTab == 1) envelopeView->tick (dt);
     for (auto* m : meters) m->tick();
+    if (fxRack != nullptr && currentTab == 4) fxRack->tick();
 
     const auto newInfo = "Stretch factor " + juce::String (xen::stretchFactor (settings.seed), 6)
                        + th::dot() + "\"octave\" " + juce::String (xen::periodCents (settings.seed), 4) + " cents"

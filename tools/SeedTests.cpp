@@ -496,9 +496,12 @@ void testChaosSafety()
     // Nasty FX settings: max feedback + spiral + max roughness, everything sent, 64 partials.
     Rig r;
     r.set (seed::ids::partials, 64.0f); r.set (seed::ids::rolloff, 0.0f); r.set (seed::ids::gain, 0.0f);
-    r.set (seed::ids::sendA, 100.0f); r.set (seed::ids::ruleA, 0.0f); r.set (seed::ids::delayFb, 95.0f);
-    r.set (seed::ids::spiral, 700.0f); r.set (seed::ids::delayLevel, 6.0f);
-    r.set (seed::ids::sendB, 100.0f); r.set (seed::ids::rough, 100.0f); r.set (seed::ids::rvbDecay, 20.0f); r.set (seed::ids::rvbLevel, 6.0f);
+    using seed::ids::fx;
+    r.set (fx (1, "mix"), 100.0f); r.set (fx (1, "picks"), 0.0f); r.set (fx (1, "dFb"), 95.0f); r.set (fx (1, "dSpiral"), 700.0f);
+    r.set (fx (2, "mix"), 100.0f); r.set (fx (2, "rRough"), 100.0f); r.set (fx (2, "rDecay"), 20.0f);
+    r.set (fx (3, "mix"), 100.0f); r.set (fx (3, "cDecay"), 20.0f); r.set (fx (3, "cChirp"), 100.0f);
+    r.set (fx (4, "kSlope"), -1.0f); r.set (fx (4, "kMake"), 24.0f); r.set (fx (4, "kThr"), -40.0f);
+    r.set (fx (5, "type"), (float) seed::FxChirp); r.set (fx (5, "mix"), 100.0f); r.set (fx (5, "in"), 1.0f);
     r.set (seed::ids::filterMode, 2.0f); r.set (seed::ids::reso, 100.0f); r.set (seed::ids::noise, 0.0f);
     r.settleCalculator();
     auto x = r.render (3.0, Rig::noteOn ({ 36, 48, 60, 64, 67, 72 }, 1.0f));
@@ -625,6 +628,74 @@ void testV04()
     check (! std::isnan (held) && std::abs (held - (float) c[2]) < 0.01f, "held key 62 reported as scale note 2", juce::String (held, 2));
 }
 
+void testV05()
+{
+    std::cout << "v0.5 (release on re-press, FX rack, picks morph, BPM sync, squash)" << std::endl;
+    using seed::ids::fx;
+    // Re-pressing a key while its previous note is still releasing: the tail keeps fading.
+    {
+        Rig r;
+        r.set (seed::ids::release, 2000.0f);
+        r.render (0.3, Rig::noteOn ({ 60 }));
+        r.render (0.05, Rig::noteOff (60));
+        r.render (0.05, Rig::noteOn ({ 60 }));
+        check (r.proc->uiActiveVoices.load() == 2, "re-pressed key: old note keeps releasing, new voice starts",
+               juce::String (r.proc->uiActiveVoices.load()) + " voices");
+    }
+    // Picks: slot 1 = delay on partials, no feedback, 200 ms. The note is cut after 50 ms (release
+    // 0), so 200-300 ms later only the echo is left: Odd -> 440 but no 880; 1.5 -> both.
+    auto echo = [] (float picks) {
+        Rig r;
+        r.set (seed::ids::release, 0.0f);
+        r.set (seed::ids::attack, 0.0f);
+        r.set (fx (1, "mix"), 100.0f); r.set (fx (1, "dFb"), 0.0f); r.set (fx (1, "dTime"), 200.0f); r.set (fx (1, "picks"), picks);
+        r.set (fx (1, "dPing"), 0.0f);
+        r.render (0.4); // let the (deliberately smoothed) picks value settle first
+        r.render (0.05, Rig::noteOn ({ 69 }));
+        r.render (0.001, Rig::noteOff (69));
+        auto x = r.render (0.4);
+        const std::vector<float> w (x.begin() + (long) (0.17 * kSr), x.begin() + (long) (0.22 * kSr));
+        return std::pair<double, double> { toneAmp (w, 440.0), toneAmp (w, 880.0) };
+    };
+    const auto odd = echo (1.0f), half = echo (1.5f);
+    check (odd.first > 0.01 && odd.second < odd.first * 0.05, "picks = Odd: echo has partial 1, not partial 2",
+           juce::String (odd.first, 4) + " / " + juce::String (odd.second, 5));
+    // Partial 2 is half as loud as partial 1 (rolloff 1), each at 50% weight -> ratio ~0.5.
+    check (half.first > 0.005 && std::abs (half.second / half.first - 0.5) < 0.1, "picks = Odd 50% / Even 50%: both in the echo",
+           juce::String (half.first, 4) + " / " + juce::String (half.second, 4));
+    // Swap slots.
+    {
+        Rig r;
+        r.set (fx (1, "mix"), 33.0f);
+        r.proc->swapFxSlots (1, 2);
+        auto v = [&r] (const juce::String& id) { auto* p = r.proc->apvts.getParameter (id); return p->convertFrom0to1 (p->getValue()); };
+        check ((int) v (fx (1, "type")) == seed::FxRough && (int) v (fx (2, "type")) == seed::FxDelay && std::abs (v (fx (2, "mix")) - 33.0f) < 0.01f,
+               "swapping slots 1 and 2 moves type and settings");
+    }
+    // BPM sync (no host = 120 BPM): 1/4 = 500 ms echo.
+    {
+        Rig r;
+        r.set (seed::ids::release, 0.0f); r.set (seed::ids::attack, 0.0f);
+        r.set (fx (1, "mix"), 100.0f); r.set (fx (1, "dFb"), 0.0f); r.set (fx (1, "dSync"), 1.0f); r.set (fx (1, "dDiv"), 4.0f);
+        r.set (fx (1, "picks"), 0.0f); r.set (fx (1, "dPing"), 0.0f);
+        r.render (0.05, Rig::noteOn ({ 69 }));
+        r.render (0.001, Rig::noteOff (69));
+        auto x = r.render (0.8);
+        const std::vector<float> before (x.begin() + (long) (0.30 * kSr), x.begin() + (long) (0.40 * kSr));
+        const std::vector<float> at (x.begin() + (long) (0.45 * kSr), x.begin() + (long) (0.50 * kSr));
+        check (peakOf (before) < 1e-3f && peakOf (at) > 0.01f, "delay synced to 1/4 at 120 BPM echoes after 500 ms");
+    }
+    // Squash: over-compression makes a loud chord QUIETER than a transparent slot.
+    auto level = [] (float slope) {
+        Rig r;
+        r.set (fx (4, "kThr"), -30.0f); r.set (fx (4, "kSlope"), slope); r.set (fx (4, "kAtt"), 1.0f);
+        return (double) peakOf (tail (r.render (0.6, Rig::noteOn ({ 48, 55, 60, 64 }, 1.0f)), 0.3));
+    };
+    const double plain = level (1.0f), over = level (-1.0f);
+    check (over < plain * 0.3, "squash slope -1 (over-compression) turns the loud chord way down",
+           juce::String (plain, 3) + " -> " + juce::String (over, 4));
+}
+
 void testPresets()
 {
     std::cout << "presets" << std::endl;
@@ -701,8 +772,9 @@ void bench()
         r.set (seed::ids::partials, (float) c.partials);
         if (c.heavy)
         {
-            r.set (seed::ids::filterMode, 1.0f); r.set (seed::ids::sendA, 50.0f); r.set (seed::ids::sendB, 50.0f);
-            r.set (seed::ids::spread, 80.0f); r.set (seed::ids::shimmer, 50.0f); r.set (seed::ids::spiral, 300.0f);
+            r.set (seed::ids::filterMode, 1.0f); r.set (seed::ids::fx (1, "mix"), 50.0f); r.set (seed::ids::fx (2, "mix"), 50.0f);
+            r.set (seed::ids::fx (3, "mix"), 50.0f); r.set (seed::ids::spread, 80.0f); r.set (seed::ids::shimmer, 50.0f);
+            r.set (seed::ids::fx (1, "dSpiral"), 300.0f);
         }
         juce::MidiBuffer m;
         for (int v = 0; v < c.voices; ++v) m.addEvent (juce::MidiMessage::noteOn (1, 40 + v * 3, 0.8f), 0);
@@ -714,9 +786,26 @@ void bench()
     }
 }
 
+/// --release: prints the level in 25 ms windows after a note-off (debugging the release shape).
+void releaseProbe()
+{
+    Rig r;
+    r.set (seed::ids::keyMode, 2.0f);
+    r.settleCalculator();
+    r.render (0.5, Rig::noteOn ({ 60 }));
+    auto x = r.render (0.8, Rig::noteOff (60));
+    for (int w = 0; w < 32; ++w)
+    {
+        double e = 0; for (int i = 0; i < 1200; ++i) e += x[(size_t) (w * 1200 + i)] * x[(size_t) (w * 1200 + i)];
+        std::cout << "  " << w * 25 << " ms: " << juce::String (10.0 * std::log10 (e / 1200.0 + 1e-20), 1) << " dB" << std::endl;
+    }
+}
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI juce;
+    for (int i = 1; i < argc; ++i)
+        if (juce::String (argv[i]) == "--release") { releaseProbe(); return 0; }
     for (int i = 1; i < argc; ++i)
         if (juce::String (argv[i]) == "--bench") { bench(); return 0; }
     testMath();
@@ -737,6 +826,7 @@ int main (int argc, char** argv)
     testPresets();
     testChaosToys();
     testV04();
+    testV05();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")
             snapshot (juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]));

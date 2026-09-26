@@ -6,6 +6,7 @@
 //   SYNTH       tabs: Keys & pitch | Envelope | Timbre | Filter & noise | FX | Modulators,
 //               plus Mutate / Dice sound
 // The editor only draws and edits parameters; the calculator itself lives in the processor.
+#include "FxRackView.h"
 #include "PluginProcessor.h"
 #include "ui/CalculatorViews.h"
 #include "ui/Controls.h"
@@ -17,9 +18,12 @@ class ControlPage : public juce::Component
 public:
     struct Item { juce::Component* c; int width; int height; bool newLine; };
     void add (juce::Component& c, int width, int height = 48) { addAndMakeVisible (c); items.push_back ({ &c, width, height, false }); }
+    /// One component filling the whole page (e.g. the FX rack).
+    void fill (juce::Component& c) { addAndMakeVisible (c); filler = &c; }
     void newLine() { items.push_back ({ nullptr, 0, 0, true }); }
     void resized() override
     {
+        if (filler != nullptr) { filler->setBounds (getLocalBounds()); return; }
         int x = 10, y = 8, rowH = 0;
         for (auto& it : items)
         {
@@ -31,6 +35,7 @@ public:
     }
 private:
     std::vector<Item> items;
+    juce::Component* filler = nullptr;
 };
 
 /// Small live meter showing a modulator's current output.
@@ -104,6 +109,7 @@ private:
     std::vector<std::unique_ptr<juce::Component>> owned; // controls living on the pages
     std::vector<ModMeter*> meters;
     pvst::EnvelopeView* envelopeView = nullptr;
+    FxRackView* fxRack = nullptr;
 
     juce::Rectangle<int> calcArea, synthArea;
     juce::String info;

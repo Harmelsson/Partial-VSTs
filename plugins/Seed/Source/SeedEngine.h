@@ -8,9 +8,9 @@
 // Per voice: up to 64 series partials + 8 custom partials as complex "rotator" oscillators
 // (phase-continuous, so every change glides — the user's "everything is dynamic" rule), a noise
 // layer, a stereo state-variable filter with its own decay envelope, and an ADSR.
-// Outputs FOUR buses: dry L/R, and two MONO sends (A, B) that only carry the partials picked by
-// each send's rule (odd, even, high half...). The processor feeds them to the Partial Delay and
-// the Rough Reverb, so FX can act on specific partials only.
+// Outputs dry L/R plus one MONO "partial bus" per FX-rack slot (v0.5): each carries only the
+// partials that slot picks (odd, even, high half..., or a smooth morph between two rules), so an
+// FX can act on specific partials only.
 //
 // Control rate: every 32 samples all partial frequencies/amplitudes, pans, sends and filter
 // coefficients are recomputed; amplitudes ramp linearly in between; parameters are smoothed.
@@ -30,6 +30,7 @@ constexpr int kMaxVoices = 16;
 constexpr int kControlBlock = 32;
 constexpr int kMaxPlayable = xen::kMaxFinalNotes;
 constexpr double kC4 = 261.6255653005986;
+constexpr int kBuses = 5; // one partial bus per FX slot
 
 enum KeyMode { Keys12 = 0, KeysSeed12 = 1, KeysScale = 2, KeysMagnet = 3 };
 enum FilterMode { FilterOff = 0, FilterLP, FilterBP, FilterHP, FilterNotch };
@@ -54,9 +55,10 @@ struct EngineParams
     double noiseDb = -60.0;
     int filterMode = FilterOff;
     double cutoff = 4000.0, reso = 0.2, keyTrack = 0.0, filterEnvOct = 0.0, filterDecayMs = 300.0;
-    // Sends (0..1) and which partials they pick.
-    double sendA = 0.0, sendB = 0.0;
-    int ruleA = RuleOdd, ruleB = RuleAll;
+    // Partial buses (one per FX slot): used or not, and which partials they pick. picks is a
+    // continuous position over the rules (1.5 = halfway between Odd and Even).
+    std::array<bool, kBuses> busOn {};
+    std::array<double, kBuses> busPicks {};
     // Chaos toys (synth-side only: the calculator never sees them).
     double wanderCents = 0.0, wanderRate = 0.5, scramble = 0.0;
 };
@@ -121,6 +123,14 @@ public:
             if (v.active && v.note == note && v.stage != Voice::Release) v.stage = Voice::Release;
     }
 
+    /// For tests: how many voices are fading out right now.
+    int releasingVoiceCount() const
+    {
+        int c = 0;
+        for (auto& v : voices) c += (v.active && v.stage == Voice::Release) ? 1 : 0;
+        return c;
+    }
+
     void allNotesOff()
     {
         for (auto& v : voices)
@@ -152,8 +162,8 @@ public:
     }
 
     // ---- Audio ------------------------------------------------------------------------------
-    /// ADDS n samples to the four buses (caller clears them first).
-    void render (float* dryL, float* dryR, float* sendAOut, float* sendBOut, int n)
+    /// ADDS n samples to dry L/R and to the kBuses partial buses (caller clears them first).
+    void render (float* dryL, float* dryR, float* const* buses, int n)
     {
         int i = 0;
         while (i < n)
@@ -163,8 +173,8 @@ public:
             for (auto& v : voices)
                 if (v.active)
                 {
-                    if (hasSends) renderVoice<true> (v, dryL + i, dryR + i, sendAOut + i, sendBOut + i, chunk);
-                    else renderVoice<false> (v, dryL + i, dryR + i, sendAOut + i, sendBOut + i, chunk);
+                    if (hasSends) renderVoice<true> (v, dryL + i, dryR + i, buses, i, chunk);
+                    else renderVoice<false> (v, dryL + i, dryR + i, buses, i, chunk);
                 }
             tickCountdown -= chunk;
             i += chunk;
@@ -188,7 +198,8 @@ private:
         float f1L = 0, f2L = 0, f1R = 0, f2R = 0;              // SVF states
         float noiseAmp = 0.0f;
         alignas (32) std::array<float, kOsc> re {}, im {}, c {}, s {};
-        alignas (32) std::array<float, kOsc> amp {}, ampStep {}, ampSm {}, panL {}, panR {}, wA {}, wB {}, shimPhase {};
+        alignas (32) std::array<float, kOsc> amp {}, ampStep {}, ampSm {}, panL {}, panR {}, shimPhase {};
+        alignas (32) std::array<std::array<float, kOsc>, kBuses> w {}; // partial-bus weights
     };
 
     static double hash (int a, int b)
@@ -249,9 +260,11 @@ private:
         s.keyTrack = smooth (s.keyTrack, t.keyTrack);
         s.filterEnvOct = smooth (s.filterEnvOct, t.filterEnvOct);
         s.filterDecayMs = t.filterDecayMs;
-        s.sendA = smooth (s.sendA, t.sendA);
-        s.sendB = smooth (s.sendB, t.sendB);
-        s.ruleA = t.ruleA; s.ruleB = t.ruleB;
+        for (int b = 0; b < kBuses; ++b)
+        {
+            s.busOn[(size_t) b] = t.busOn[(size_t) b];
+            s.busPicks[(size_t) b] = smooth (s.busPicks[(size_t) b], t.busPicks[(size_t) b]); // glides, no clicks
+        }
         s.wanderCents = smooth (s.wanderCents, t.wanderCents);
         s.wanderRate = t.wanderRate;
         s.scramble = smooth (s.scramble, t.scramble);
@@ -342,7 +355,8 @@ private:
         const double glideCoef = s.glideMs <= 0.5 ? 0.0 : std::exp (-tickSec / (s.glideMs * 0.001));
         const float fenvCoef = (float) std::exp (-tickSec / std::max (0.001, s.filterDecayMs * 0.001));
         const float noiseAmp = s.noiseDb <= -59.9 ? 0.0f : (float) (0.5 * std::pow (10.0, s.noiseDb / 20.0));
-        hasSends = s.sendA > 1e-4 || s.sendB > 1e-4 || target.sendA > 0.0 || target.sendB > 0.0;
+        hasSends = false;
+        for (int b = 0; b < kBuses; ++b) hasSends |= s.busOn[(size_t) b];
 
         // Wander: every partial walks its own bounded random path (shared by all voices).
         if (s.wanderCents > 1e-3)
@@ -355,7 +369,8 @@ private:
             }
 
         // Shared (voice-independent) partial table: the calculator's edited partials.
-        std::array<double, kOsc> cents {}, calcAmp {}, sendWA {}, sendWB {}, panL {}, panR {};
+        std::array<double, kOsc> cents {}, calcAmp {}, panL {}, panR {};
+        std::array<std::array<double, kOsc>, kBuses> busW {};
         std::array<bool, kOsc> isCustom {};
         for (int i = 0; i < kOsc; ++i)
         {
@@ -381,8 +396,15 @@ private:
                 if (s.oddEven < 0 && odd) calcAmp[ii] *= 1.0 + s.oddEven;
             }
             if (i > 0) cents[ii] += s.wanderCents * wanderState[ii];
-            sendWA[ii] = s.sendA * sendRule (s.ruleA, i, isCustom[ii]);
-            sendWB[ii] = s.sendB * sendRule (s.ruleB, i, isCustom[ii]);
+            for (int b = 0; b < kBuses; ++b)
+                if (s.busOn[(size_t) b])
+                {
+                    // Morph between two neighbouring rules (e.g. Odd -> Even).
+                    const double x = std::clamp (s.busPicks[(size_t) b], 0.0, 9.0);
+                    const int r0 = (int) std::floor (x);
+                    const double f = x - r0;
+                    busW[(size_t) b][ii] = (1.0 - f) * sendRule (r0, i, isCustom[ii]) + (f > 0.0 ? f * sendRule (std::min (r0 + 1, 9), i, isCustom[ii]) : 0.0);
+                }
             // Stereo spread: each partial gets a fixed random place in the stereo field.
             const double pan = s.spread * (hash (i, 3) * 2.0 - 1.0);
             const double ang = (pan + 1.0) * 0.25 * 3.141592653589793;
@@ -449,8 +471,7 @@ private:
                 v.s[ii] = (float) std::sin (w);
                 v.panL[ii] = (float) panL[ii];
                 v.panR[ii] = (float) panR[ii];
-                v.wA[ii] = (float) sendWA[ii];
-                v.wB[ii] = (float) sendWB[ii];
+                for (int b = 0; b < kBuses; ++b) v.w[(size_t) b][ii] = (float) busW[(size_t) b][ii];
             }
             const double norm = power > 1e-12 ? 1.0 / std::sqrt (power) : 0.0;
 
@@ -501,14 +522,15 @@ private:
     }
 
     template <bool Sends>
-    void renderVoice (Voice& v, float* dL, float* dR, float* sA, float* sB, int n)
+    void renderVoice (Voice& v, float* dL, float* dR, float* const* buses, int offset, int n)
     {
         const int P = v.numActive;
         float* re = v.re.data(); float* im = v.im.data();
         const float* c = v.c.data(); const float* s_ = v.s.data();
         float* amp = v.amp.data(); const float* step = v.ampStep.data();
         const float* pl = v.panL.data(); const float* pr = v.panR.data();
-        const float* wa = v.wA.data(); const float* wb = v.wB.data();
+        const float* w0 = v.w[0].data(); const float* w1 = v.w[1].data(); const float* w2 = v.w[2].data();
+        const float* w3 = v.w[3].data(); const float* w4 = v.w[4].data();
         const float gain = v.velGain * v.lifeGain * masterGain;
         const bool filt = s.filterMode != FilterOff;
 
@@ -530,7 +552,7 @@ private:
                 if (v.env < 0.001f) { v.active = false; v.env = 0.0f; return; }
             }
 
-            float sl = 0.0f, sr_ = 0.0f, a = 0.0f, b = 0.0f;
+            float sl = 0.0f, sr_ = 0.0f, b0 = 0.0f, b1 = 0.0f, b2 = 0.0f, b3 = 0.0f, b4 = 0.0f;
             for (int p = 0; p < P; ++p)
             {
                 const float r = re[p] * c[p] - im[p] * s_[p];
@@ -539,7 +561,7 @@ private:
                 const float x = amp[p] * im[p];
                 sl += x * pl[p];
                 sr_ += x * pr[p];
-                if constexpr (Sends) { a += x * wa[p]; b += x * wb[p]; }
+                if constexpr (Sends) { b0 += x * w0[p]; b1 += x * w1[p]; b2 += x * w2[p]; b3 += x * w3[p]; b4 += x * w4[p]; }
                 amp[p] += step[p];
             }
             if (v.noiseAmp > 0.0f) { sl += v.noiseAmp * rnd (v.rng); sr_ += v.noiseAmp * rnd (v.rng); }
@@ -547,7 +569,11 @@ private:
             const float g = v.env * gain;
             dL[i] += sl * g;
             dR[i] += sr_ * g;
-            if constexpr (Sends) { sA[i] += a * g; sB[i] += b * g; }
+            if constexpr (Sends)
+            {
+                buses[0][offset + i] += b0 * g; buses[1][offset + i] += b1 * g; buses[2][offset + i] += b2 * g;
+                buses[3][offset + i] += b3 * g; buses[4][offset + i] += b4 * g;
+            }
         }
     }
 
@@ -557,9 +583,12 @@ private:
         return (float) (st & 0xffffff) / 8388608.0f - 1.0f;
     }
 
+    /// A key pressed again while its voice is still HELD re-uses that voice. A voice that is
+    /// already releasing is left alone to fade out (v0.5 fix: re-using it cut the release off
+    /// instantly, which the user heard as notes "just stopping").
     Voice* findVoiceForNote (int note)
     {
-        for (auto& v : voices) if (v.active && v.note == note) return &v;
+        for (auto& v : voices) if (v.active && v.note == note && v.stage != Voice::Release) return &v;
         return nullptr;
     }
     Voice* findFreeVoice()

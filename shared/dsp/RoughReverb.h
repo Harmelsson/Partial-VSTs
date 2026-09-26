@@ -48,29 +48,34 @@ public:
         }
     }
 
-    /// Mono in, ADDS stereo out.
-    void process (const float* in, float* outL, float* outR, int n, double decaySec, double level)
+    /// Stereo in (summed), writes (replaces) the stereo WET signal. damping 0..1 (1 = dark).
+    void process (const float* inL, const float* inR, float* outL, float* outR, int n, double decaySec, double damping)
     {
+        std::fill (outL, outL + n, 0.0f);
+        std::fill (outR, outR + n, 0.0f);
         if (active == 0) return;
-        const float inScale = 0.6f / (float) active;
-        const float lvl = (float) level;
+        const float inScale = 0.3f / (float) active;
+        const float lvl = 1.0f;
         const double t60 = std::max (0.05, decaySec);
+        const float damp = (float) (0.9 - 0.85 * std::clamp (damping, 0.0, 1.0));
         for (int k = 0; k < active; ++k)
         {
             auto& c = combs[(size_t) k];
             // Even resonators left, odd (the twins) right: partners beat across the ears.
             float* out = (k % 2 == 0) ? outL : outR;
+            // Gain from the decay time (per block: cheap, and glides are slow anyway).
+            const float g = (float) std::pow (0.001, c.delay / (sr * t60));
             for (int i = 0; i < n; ++i)
             {
                 c.delay = c.target + (c.delay - c.target) * glideCoef;
-                const float g = (float) std::pow (0.001, c.delay / (sr * t60));
+                const float in = inL[i] + inR[i];
                 double pos = (double) c.write - c.delay;
                 while (pos < 0) pos += kBuf;
                 const int i0 = (int) pos;
                 const float fr = (float) (pos - i0);
                 const float y = c.buf[(size_t) i0] + fr * (c.buf[(size_t) ((i0 + 1) % kBuf)] - c.buf[(size_t) i0]);
-                c.lp += 0.35f * (y - c.lp); // damping: highs die first, like a real room
-                c.buf[(size_t) c.write] = in[i] * inScale + g * c.lp;
+                c.lp += damp * (y - c.lp); // damping: highs die first, like a real room
+                c.buf[(size_t) c.write] = in * inScale + g * c.lp;
                 c.write = (c.write + 1) % kBuf;
                 out[i] += lvl * y;
             }

@@ -226,7 +226,7 @@ private:
                 // a sounding note glides towards new amplitudes.
                 v.ampSmoothed[idx] = v.fresh ? (float) (tgt[idx] * norm)
                                              : (float) smoothTowards (v.ampSmoothed[idx], tgt[idx] * norm, ampCoef);
-                if (v.ampSmoothed[idx] < 1e-6f && tgt[idx] == 0.0) v.ampSmoothed[idx] = 0.0f;
+                if (v.ampSmoothed[idx] < 1e-6f && tgt[idx] <= 0.0) v.ampSmoothed[idx] = 0.0f;
                 v.ampStep[idx] = (v.ampSmoothed[idx] - v.amp[idx]) / (float) kControlBlock;
                 if (v.ampSmoothed[idx] > 0.0f || v.amp[idx] > 0.0f) highest = p + 1;
 

@@ -70,7 +70,7 @@ void PartialView::paint (juce::Graphics& g)
 
     g.setColour (th::textDim);
     g.setFont (th::font (12.0f));
-    g.drawText ("partials", b.reduced (14.0f, 8.0f).removeFromTop (16.0f), juce::Justification::topLeft);
+    g.drawText ("partials", b.reduced (14.0f, 8.0f).removeFromTop (16.0f), juce::Justification::topRight);
 }
 
 // ================================================================================================
@@ -93,7 +93,7 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
                                                                       &attackKnob, &releaseKnob, &gainKnob, &droneNoteKnob,
                                                                       &keysToggle, &droneToggle })
         addAndMakeVisible (c);
-    setSize (780, 480);
+    setSize (800, 500);
     startTimerHz (60);
 }
 
@@ -142,25 +142,26 @@ void SeedEditor::paint (juce::Graphics& g)
 void SeedEditor::resized()
 {
     auto b = getLocalBounds().reduced (20);
-    b.removeFromTop (34); // title
-    partialView.setBounds (b.removeFromTop (170));
-    b.removeFromTop (14);
+    b.removeFromTop (34);                               // title
+    partialView.setBounds (b.removeFromTop (160));
+    b.removeFromTop (12);
 
-    auto bottom = b.removeFromBottom (40);
-    keysToggle.setBounds (bottom.removeFromLeft (190).withSizeKeepingCentre (190, 26));
-    droneToggle.setBounds (bottom.removeFromLeft (110).withSizeKeepingCentre (110, 26));
+    auto bottom = b.removeFromBottom (34);             // toggles (version text is painted below)
+    keysToggle.setBounds (bottom.removeFromLeft (200).withSizeKeepingCentre (200, 26));
+    droneToggle.setBounds (bottom.removeFromLeft (120).withSizeKeepingCentre (120, 26));
 
-    auto seedArea = b.removeFromLeft (230);
-    seedKnob.setBounds (seedArea.withTrimmedBottom (26).withSizeKeepingCentre (190, 190).withY (seedArea.getY()));
+    // Big seed knob on the left; its read-out line is painted just under it (see paint()).
+    auto seedArea = b.removeFromLeft (250);
+    seedKnob.setBounds (seedArea.getX() + (seedArea.getWidth() - 170) / 2, seedArea.getY(), 170, 190);
 
+    // Six smaller knobs, 3 x 2.
     b.removeFromLeft (10);
-    const int w = b.getWidth() / 4;
+    const int w = b.getWidth() / 3;
     auto row1 = b.removeFromTop (b.getHeight() / 2);
-    partialsKnob.setBounds (row1.removeFromLeft (w).reduced (6));
-    rolloffKnob.setBounds (row1.removeFromLeft (w).reduced (6));
-    gainKnob.setBounds (row1.removeFromLeft (w).reduced (6));
-    auto row2 = b;
-    attackKnob.setBounds (row2.removeFromLeft (w).reduced (6));
-    releaseKnob.setBounds (row2.removeFromLeft (w).reduced (6));
-    droneNoteKnob.setBounds (row2.removeFromLeft (w).reduced (6));
+    partialsKnob.setBounds (row1.removeFromLeft (w).reduced (8, 2));
+    rolloffKnob.setBounds (row1.removeFromLeft (w).reduced (8, 2));
+    gainKnob.setBounds (row1.reduced (8, 2));
+    attackKnob.setBounds (b.removeFromLeft (w).reduced (8, 2));
+    releaseKnob.setBounds (b.removeFromLeft (w).reduced (8, 2));
+    droneNoteKnob.setBounds (b.reduced (8, 2));
 }

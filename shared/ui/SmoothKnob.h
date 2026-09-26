@@ -44,7 +44,7 @@ public:
     {
         const float target = param.getValue();
         const float next = theme::ease (shown, target);
-        if (next != shown) { shown = next; repaint(); }
+        if (! juce::exactlyEqual (next, shown)) { shown = next; repaint(); }
     }
 
     void paint (juce::Graphics& g) override
@@ -80,7 +80,7 @@ public:
 
         // Value text in the middle, name under the dial.
         g.setColour (theme::text);
-        g.setFont (theme::font (valueFont > 0 ? valueFont : juce::jmax (11.0f, r * 0.30f)));
+        g.setFont (theme::font (valueFont > 0 ? valueFont : juce::jmax (10.0f, r * 0.26f)));
         g.drawFittedText (param.getCurrentValueAsText(), dial.reduced (inner * 0.35f).toNearestInt(), juce::Justification::centred, 1);
         if (showName)
         {
@@ -135,8 +135,8 @@ public:
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
-        const float dir = (w.deltaY != 0 ? w.deltaY : w.deltaX) * (w.isReversed ? -1.0f : 1.0f);
-        if (dir == 0) return;
+        const float dir = (! juce::exactlyEqual (w.deltaY, 0.0f) ? w.deltaY : w.deltaX) * (w.isReversed ? -1.0f : 1.0f);
+        if (juce::exactlyEqual (dir, 0.0f)) return;
         const int steps = param.getNumSteps();
         float step = steps > 1 && steps < 1000 ? 1.0f / (float) (steps - 1) : 0.01f;
         if (e.mods.isShiftDown() && steps >= 1000) step *= 0.1f;
@@ -189,7 +189,7 @@ public:
     void tick()
     {
         const float next = theme::ease (shown, param.getValue() > 0.5f ? 1.0f : 0.0f, 0.25f);
-        if (next != shown) { shown = next; repaint(); }
+        if (! juce::exactlyEqual (next, shown)) { shown = next; repaint(); }
     }
 
     void paint (juce::Graphics& g) override

@@ -209,7 +209,7 @@ void testSafety()
     }
     Rig idle;
     auto silence = idle.render (0.5);
-    check (peakOf (silence) == 0.0f, "no notes = exact silence");
+    check (peakOf (silence) <= 0.0f, "no notes = exact silence");
 }
 
 void testKeys()
@@ -252,7 +252,7 @@ void testState()
     b.proc->setStateInformation (mb.getData(), (int) mb.getSize());
     const float s = b.proc->apvts.getRawParameterValue (seed::ids::seed)->load();
     const float p = b.proc->apvts.getRawParameterValue (seed::ids::partials)->load();
-    check (std::abs (s - 2.7182f) < 1e-4f && p == 33.0f, "save + load restores parameters",
+    check (std::abs (s - 2.7182f) < 1e-4f && std::abs (p - 33.0f) < 1e-6f, "save + load restores parameters",
            "seed " + juce::String (s, 4) + ", partials " + juce::String (p));
 }
 

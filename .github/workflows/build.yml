@@ -1,0 +1,42 @@
+# Builds every plugin for Windows on each push, runs the headless tests, and uploads a zip the
+# user downloads from the Actions tab ("Artifacts" at the bottom of a run).
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache JUCE download
+        uses: actions/cache@v4
+        with:
+          path: deps
+          key: juce-8.0.15-${{ runner.os }}
+
+      - name: Configure
+        run: cmake -B build -A x64 -DPVST_BUILD_NUMBER=${{ github.run_number }} -DFETCHCONTENT_BASE_DIR=${{ github.workspace }}/deps
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "dist/PartialVSTs-build-${{ github.run_number }}"
+          New-Item -ItemType Directory -Force "$out/VST3", "$out/Standalone" | Out-Null
+          Copy-Item -Recurse build/plugins/*/*_artefacts/Release/VST3/*.vst3 "$out/VST3/"
+          Copy-Item build/plugins/*/*_artefacts/Release/Standalone/*.exe "$out/Standalone/"
+          Copy-Item docs/TESTING.md "$out/HOW_TO_INSTALL.md"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PartialVSTs-windows-build-${{ github.run_number }}
+          path: dist

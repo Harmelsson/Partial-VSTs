@@ -150,3 +150,5 @@ drives the limiter hard (safe, but loud) — levels may want taming after the us
 - v0.3.1 (same session): chaos toys — Chord (size/step; in Scale mode steps are scale degrees),
   partial Wander (shared random walk per partial), loudness Scramble. `--bench` CPU check added.
   Timbre tab relaid into two rows (first version overflowed the page). 59/59 checks.
+- 09:05 check-in: CI run #9 (Seed v0.3.1) green on Windows incl. all 59 tests; Release `build-9`
+  published (run #8 for v0.3.0 was cancelled by the newer push, as designed).

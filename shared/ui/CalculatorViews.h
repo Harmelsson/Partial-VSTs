@@ -77,7 +77,14 @@ public:
         const double span = std::abs (r.curve.periodCents) + xen::DissonanceCalculator::kOvershootCents;
         frameMax = std::max (600.0, std::ceil (span / 600.0) * 600.0); // steady frame, 600-cent steps
     }
-    void setScale (const xen::FinalScale& s) { scale = s; }
+    void setScale (const xen::FinalScale& s)
+    {
+        scale = s;
+        // A locked scale can be longer than the live curve: keep its notes inside the frame.
+        if (s.valid) frameMax = std::max (frameMax, std::ceil ((s.period + xen::DissonanceCalculator::kOvershootCents) / 600.0) * 600.0);
+    }
+    /// Scale lock (v0.6): the notes drawn are a frozen snapshot, the curve underneath is live.
+    void setLocked (bool l) { locked = l; }
     /// Optional label drawn above each note (index = FinalScale index), e.g. the key playing it.
     void setNoteLabels (std::vector<juce::String> l) { labels = std::move (l); }
     /// Where the keyboard's keys land (v0.5, "visualise every scale type"): small labelled
@@ -96,7 +103,19 @@ public:
     void paint (juce::Graphics& g) override
     {
         const bool consonance = result.settings.method == xen::Method::Consonance;
-        auto inner = theme::drawSection (g, getLocalBounds(), consonance ? "Consonance (cross-note)" : "Dissonance curve").toFloat();
+        const auto method = result.settings.method;
+        const juce::String title = consonance ? "Consonance (cross-note)"
+                                 : method == xen::Method::Edo ? "Dissonance curve  -  EDO steps"
+                                 : method == xen::Method::SeedEdo ? "Dissonance curve  -  equal steps of the seed's octave"
+                                 : "Dissonance curve";
+        auto inner = theme::drawSection (g, getLocalBounds(), title).toFloat();
+        if (locked)
+        {
+            const float tw = juce::GlyphArrangement::getStringWidth (theme::sans (11.5f).withExtraKerningFactor (0.22f), title.toUpperCase());
+            g.setColour (theme::modified);
+            g.setFont (theme::sans (11.5f, true).withExtraKerningFactor (0.22f));
+            g.drawText ("SCALE LOCKED", juce::Rectangle<float> (9.0f + tw + 16.0f, 6.0f, 140.0f, 18.0f), juce::Justification::centredLeft);
+        }
         g.setColour (theme::dim());
         g.setFont (theme::sans (11.5f));
         const juce::String hint = busy ? juce::String ("calculating...")
@@ -163,9 +182,9 @@ public:
         if (showEdo)
         {
             g.setFont (theme::sans (10.5f));
-            for (double c = edoOffset - 100.0 * std::floor (edoOffset / 100.0); c <= frameMax; c += 100.0)
+            for (double ec = edoOffset - 100.0 * std::floor (edoOffset / 100.0); ec <= frameMax; ec += 100.0)
             {
-                const float x = xOf (c);
+                const float x = xOf (ec);
                 g.setColour (theme::mix (0.35f));
                 for (float y = data.getY(); y < data.getBottom(); y += 7.0f) g.fillRect (x, y, 1.0f, 3.0f);
             }
@@ -185,7 +204,11 @@ public:
         }
 
         // Notes: a clear vertical line, a big hollow square on the curve, and the key label on top
-        // (user v0.3.1: "notes barely visible").
+        // (user v0.3.1: "notes barely visible"). With many notes (EDO up to 120 steps) the squares
+        // shrink to fit between neighbours.
+        float noteSide = 14.0f;
+        for (int i = 1; i < scale.count; ++i)
+            noteSide = juce::jmin (noteSide, juce::jmax (5.0f, (xOf (scale.notes[(size_t) i].cents) - xOf (scale.notes[(size_t) i - 1].cents)) * 0.85f));
         for (int i = 0; i < scale.count; ++i)
         {
             const auto& n = scale.notes[(size_t) i];
@@ -200,12 +223,12 @@ public:
             const int colIdx = juce::jlimit (0, cols - 1, lattice.colAt (x));
             const float h = juce::jmax (0.0f, shown[(size_t) colIdx]);
             const float y = lattice.rowCentreY ((int) std::round (h * (float) (lattice.numRows() - 1)));
-            const float side = 14.0f + 10.0f * e; // a played note's square grows
+            const float side = noteSide + 10.0f * e; // a played note's square grows
             g.setColour (theme::bg);
             g.fillRect (juce::Rectangle<float> (side, side).withCentre ({ x, y }));
             g.setColour (col);
             g.drawRect (juce::Rectangle<float> (side, side).withCentre ({ x, y }), 2.0f);
-            g.fillRect (juce::Rectangle<float> (4.0f + 8.0f * e, 4.0f + 8.0f * e).withCentre ({ x, y }));
+            g.fillRect (juce::Rectangle<float> (juce::jmin (4.0f, noteSide * 0.3f) + 8.0f * e, juce::jmin (4.0f, noteSide * 0.3f) + 8.0f * e).withCentre ({ x, y }));
             if (! n.enabled)
             {
                 g.drawLine (x - 6, y - 6, x + 6, y + 6, 1.4f);
@@ -277,7 +300,7 @@ private:
     std::vector<float> shown;
     double frameMax = 1800.0;
     float lastDt = 1.0f / 60.0f;
-    bool busy = false, dragging = false;
+    bool busy = false, dragging = false, locked = false;
     xen::FinalNote dragNote;
     float dragStartX = 0.0f;
     double dragStartCents = 0.0;

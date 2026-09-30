@@ -3,12 +3,6 @@
 
 using namespace seed;
 
-// Mod target indices (must match modTargetNames()/modTargetIds() order in SeedParams.h).
-enum Tgt { T_None = 0, T_Seed, T_Fund, T_Rolloff, T_MinDip, T_Pitch, T_FShift, T_Tilt, T_OddEven, T_Spread,
-           T_Shimmer, T_FormFreq, T_FormGain, T_Noise, T_Cutoff, T_Reso, T_FilterEnv, T_Fx1Mix, T_Fx1Time,
-           T_Fx1Fb, T_Fx1Spiral, T_Fx2Mix, T_Fx2Decay, T_Fx2Rough, T_Magnet, T_Life, T_Glide, T_Gain, T_Wander, T_Scramble,
-           T_Fx1Picks, T_Fx2Picks, T_Fx3Mix, T_Fx3Picks, T_Fx4Mix, T_Fx5Mix, T_Count };
-
 SeedProcessor::SeedProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "SeedState", createParameterLayout())
@@ -41,17 +35,36 @@ SeedProcessor::SeedProcessor()
         mShape[(size_t) m - 1] = apvts.getParameter (ids::modShape (m));
         mRate[(size_t) m - 1] = apvts.getParameter (ids::modRate (m));
         mDepth[(size_t) m - 1] = apvts.getParameter (ids::modDepth (m));
-        mTarget[(size_t) m - 1] = apvts.getParameter (ids::modTarget (m));
+        mSync[(size_t) m - 1] = apvts.getParameter (ids::modSync (m));
+        mBeat[(size_t) m - 1] = apvts.getParameter (ids::modBeat (m));
+        if (m <= kLegacyMods) mTarget[(size_t) m - 1] = apvts.getParameter (ids::modTarget (m));
         mods[(size_t) m - 1].reset ((uint32_t) (m * 7919));
     }
     for (auto& id : modTargetIds())
         targetParams.push_back (id.isEmpty() ? nullptr : apvts.getParameter (id));
-    for (int t = 1; t < (int) targetParams.size(); ++t)
-        if (targetParams[(size_t) t] != nullptr) targetOf[targetParams[(size_t) t]] = t;
-    jassert ((int) targetParams.size() == T_Count);
-    modOffset.assign ((size_t) T_Count, 0.0);
+    pSeed = apvts.getParameter (ids::seed); pFund = apvts.getParameter (ids::fundamental);
+    pRolloff = apvts.getParameter (ids::rolloff); pMinDip = apvts.getParameter (ids::minDip);
+    pTol = apvts.getParameter (ids::tolerance);
+    for (int sl = 1; sl <= kNumFx; ++sl)
+    {
+        auto g = [sl, this] (const char* n) { return apvts.getParameter (ids::fx (sl, n)); };
+        fxp[(size_t) sl - 1] = { g ("type"), g ("on"), g ("in"), g ("picks"), g ("mix"), g ("pan"), g ("width"), g ("dTime"), g ("dSync"),
+                                 g ("dBeat"), g ("dFb"), g ("dSpiral"), g ("dPing"), g ("dTone"), g ("rDecay"), g ("rRough"), g ("rDamp"),
+                                 g ("cDecay"), g ("cChirp"), g ("cSize"), g ("cDamp"), g ("kThr"), g ("kSlope"), g ("kAtt"), g ("kRel"), g ("kMake") };
+    }
+    for (int b = 1; b <= kEqBands; ++b)
+    {
+        auto g = [b, this] (const char* n) { return apvts.getParameter (ids::eq (b, n)); };
+        eqp[(size_t) b - 1] = { g ("on"), g ("type"), g ("freq"), g ("gain"), g ("q"), g ("steep"), g ("kt") };
+    }
+    const auto numParams = (size_t) getParameters().size();
+    modOffset.assign (numParams, 0.0);
+    uiModOffset = std::make_unique<std::atomic<float>[]> (numParams);
+    for (size_t i = 0; i < numParams; ++i) uiModOffset[i].store (0.0f);
     for (auto& h : uiHeld) h.store (std::nanf (""));
+    for (auto& h : uiHitCents) h.store (0.0f);
 
+    absorbLegacyTargets();
     pumpCalculator();
     startTimerHz (30);
 }
@@ -84,64 +97,97 @@ void SeedProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 // ================================================================================================
 // Parameters -> engine (audio thread)
 // ================================================================================================
-double SeedProcessor::eff (juce::RangedAudioParameter* p, int modTarget) const
+double SeedProcessor::eff (juce::RangedAudioParameter* p) const
 {
     double norm = p->getValue();
-    if (modTarget > 0) norm = juce::jlimit (0.0, 1.0, norm + modOffset[(size_t) modTarget]);
+    const double off = modOffset[(size_t) p->getParameterIndex()];
+    if (! juce::exactlyEqual (off, 0.0)) norm = juce::jlimit (0.0, 1.0, norm + off);
     return p->convertFrom0to1 ((float) norm);
+}
+
+/// Modulators -> per-parameter offsets (normalised units). Depth 100 % swings a full half-range each
+/// way; each link's amount scales that. A modulator's own rate / depth can be modulated too, using the
+/// other modulators' values from the previous block (so there is no ordering problem).
+void SeedProcessor::computeModOffsets (double blockSeconds)
+{
+    auto accumulate = [this] (const std::array<double, kNumMods>& value, const std::array<double, kNumMods>& depth) {
+        std::fill (modOffset.begin(), modOffset.end(), 0.0);
+        for (auto& sl : linkSlots)
+        {
+            const int pi = sl.param.load (std::memory_order_relaxed), m = sl.mod.load (std::memory_order_relaxed);
+            if (pi < 0 || m < 1 || m > kNumMods) continue;
+            modOffset[(size_t) pi] += 0.5 * depth[(size_t) m - 1] * (double) sl.amount.load (std::memory_order_relaxed) * 0.01 * value[(size_t) m - 1];
+        }
+    };
+    std::array<double, kNumMods> depth {}, value {};
+    for (int m = 0; m < kNumMods; ++m) depth[(size_t) m] = mDepth[(size_t) m]->convertFrom0to1 (mDepth[(size_t) m]->getValue()) / 100.0;
+    accumulate (lastModValue, depth);
+    for (int m = 0; m < kNumMods; ++m)
+    {
+        const auto um = (size_t) m;
+        const int shape = (int) mShape[um]->convertFrom0to1 (mShape[um]->getValue());
+        // Hz, or synced to the host tempo with a division (straight / triplet / dotted).
+        const double rate = eff (mSync[um]) > 0.5 ? (bpm / 60.0) / beatLength ((int) std::lround (eff (mBeat[um]))) : eff (mRate[um]);
+        depth[um] = eff (mDepth[um]) / 100.0;
+        value[um] = mods[um].advance (shape, rate, blockSeconds);
+        uiModValue[um].store ((float) value[um], std::memory_order_relaxed);
+    }
+    lastModValue = value;
+    accumulate (value, depth);
+    for (auto& sl : linkSlots) // the UI's view of the same offsets
+        if (const int pi = sl.param.load (std::memory_order_relaxed); pi >= 0) uiModOffset[(size_t) pi].store ((float) modOffset[(size_t) pi], std::memory_order_relaxed);
 }
 
 void SeedProcessor::buildEngineParams (double blockSeconds)
 {
-    // 1. Modulators -> offsets (normalised). Depth 100% swings a full half-range each way.
-    std::fill (modOffset.begin(), modOffset.end(), 0.0);
-    for (int m = 0; m < kNumMods; ++m)
-    {
-        const int shape = (int) mShape[(size_t) m]->convertFrom0to1 (mShape[(size_t) m]->getValue());
-        // Hz, or synced to the host tempo (v0.5).
-        auto* syncP = P (ids::modSync (m + 1).toRawUTF8());
-        auto* divP = P (ids::modDiv (m + 1).toRawUTF8());
-        const double rate = syncP->getValue() > 0.5f ? (bpm / 60.0) / syncDivBeats ((int) std::lround (divP->convertFrom0to1 (divP->getValue())))
-                                                     : mRate[(size_t) m]->convertFrom0to1 (mRate[(size_t) m]->getValue());
-        const double depth = mDepth[(size_t) m]->convertFrom0to1 (mDepth[(size_t) m]->getValue()) / 100.0;
-        const int tgt = (int) mTarget[(size_t) m]->convertFrom0to1 (mTarget[(size_t) m]->getValue());
-        const double v = mods[(size_t) m].advance (shape, rate, blockSeconds);
-        uiModValue[(size_t) m].store ((float) v, std::memory_order_relaxed);
-        if (tgt > 0 && tgt < T_Count) modOffset[(size_t) tgt] += 0.5 * depth * v;
-    }
-    auto E = [this] (int t) { return eff (targetParams[(size_t) t], t); };
-    auto V = [this] (const char* id) { auto* p = P (id); return (double) p->convertFrom0to1 (p->getValue()); };
+    computeModOffsets (blockSeconds);
+    auto E = [this] (juce::RangedAudioParameter* p) { return eff (p); };
+    auto V = [this] (const char* id) { return eff (P (id)); };
 
-    // 2. Calculator inputs (effective) — also published for the calculator pump.
-    ep.seed = E (T_Seed);
-    ep.fundamentalHz = E (T_Fund);
-    ep.rolloff = E (T_Rolloff);
+    // Calculator inputs (effective) — also published for the calculator pump.
+    ep.seed = E (pSeed);
+    ep.fundamentalHz = E (pFund);
+    ep.rolloff = E (pRolloff);
     ep.partials = juce::jlimit (1, xen::kSeriesPartials, (int) std::lround (V (ids::partials)));
     effSeed.store ((float) ep.seed); effFund.store ((float) ep.fundamentalHz); effRolloff.store ((float) ep.rolloff);
-    effMinDip.store ((float) E (T_MinDip));
+    effMinDip.store ((float) E (pMinDip)); effTol.store ((float) E (pTol));
     ep.edits = partialEditsFromParams();
 
-    // 3. Synth.
+    // Synth.
     ep.attackMs = V (ids::attack); ep.decayMs = V (ids::decay); ep.sustain = V (ids::sustain) / 100.0;
-    ep.releaseMs = V (ids::release); ep.velocitySens = V (ids::velocity) / 100.0; ep.gainDb = E (T_Gain);
-    ep.keyMode = (int) V (ids::keyMode);
-    ep.magnet = E (T_Magnet) / 100.0; ep.life = E (T_Life) / 100.0; ep.glideMs = E (T_Glide);
-    ep.pitchCents = E (T_Pitch); ep.fshiftHz = E (T_FShift);
+    ep.releaseMs = V (ids::release); ep.velocitySens = V (ids::velocity) / 100.0; ep.gainDb = V (ids::gain);
+    ep.keyMode = (int) std::lround (V (ids::keyMode));
+    ep.baseKey = juce::jlimit (0, 127, (int) std::lround (V (ids::baseKey)));
+    ep.magnet = V (ids::magnet) / 100.0; ep.life = V (ids::life) / 100.0; ep.glideMs = V (ids::glide);
+    ep.pitchCents = V (ids::pitch); ep.fshiftHz = V (ids::fshift);
     ep.bendCents = bendNorm * V (ids::bendRange) * 100.0;
-    ep.tiltDbOct = E (T_Tilt); ep.oddEven = E (T_OddEven) / 100.0; ep.spread = E (T_Spread) / 100.0;
-    ep.shimmer = E (T_Shimmer) / 100.0; ep.shimmerRate = V (ids::shimmerSync) > 0.5 ? (bpm / 60.0) / syncDivBeats ((int) V (ids::shimmerDiv)) : V (ids::shimmerRate);
-    ep.formFreq = E (T_FormFreq); ep.formGainDb = E (T_FormGain); ep.formWidth = V (ids::formWidth);
-    ep.noiseDb = E (T_Noise);
-    ep.filterMode = (int) V (ids::filterMode); ep.cutoff = E (T_Cutoff); ep.reso = E (T_Reso) / 100.0;
-    ep.keyTrack = V (ids::keyTrack) / 100.0; ep.filterEnvOct = E (T_FilterEnv); ep.filterDecayMs = V (ids::filterDecay);
+    ep.tiltDbOct = V (ids::tilt); ep.oddEven = V (ids::oddEven) / 100.0; ep.spread = V (ids::spread) / 100.0;
+    ep.shimmer = V (ids::shimmer) / 100.0;
+    ep.shimmerRate = V (ids::shimmerSync) > 0.5 ? (bpm / 60.0) / beatLength ((int) std::lround (V (ids::shimmerBeat))) : V (ids::shimmerRate);
+    ep.formFreq = V (ids::formFreq); ep.formGainDb = V (ids::formGain); ep.formWidth = V (ids::formWidth);
+    // v0.6: the per-voice filter and the noise layer were taken out of the UI (user request); the
+    // engine still contains them, dormant, so they can come back in a rework.
+    ep.noiseDb = -60.0; ep.filterMode = FilterOff;
+    for (int b = 0; b < kEqBands; ++b)
+    {
+        const auto& q = eqp[(size_t) b];
+        auto& band = ep.eq[(size_t) b];
+        band.on = E (q.on) > 0.5;
+        band.type = juce::jlimit (0, pvst::eq::kNumTypes - 1, (int) std::lround (E (q.type)));
+        band.freq = E (q.freq); band.gainDb = E (q.gain); band.q = E (q.q);
+        band.steep = juce::jlimit (1, pvst::eq::kMaxSections, (int) std::lround (E (q.steep)) + 1);
+        ep.eqKeyTrack[(size_t) b] = E (q.kt) / 100.0;
+    }
     for (int sl = 1; sl <= kNumFx; ++sl)
     {
-        const int type = (int) std::lround (fxValue (sl, "type"));
-        ep.busOn[(size_t) sl - 1] = type != FxOff && fxValue (sl, "on") > 0.5 && (int) std::lround (fxValue (sl, "in")) == 1;
-        ep.busPicks[(size_t) sl - 1] = fxValue (sl, "picks");
+        const auto& f = fxp[(size_t) sl - 1];
+        const int type = (int) std::lround (E (f.type));
+        ep.busOn[(size_t) sl - 1] = type != FxOff && E (f.on) > 0.5 && (int) std::lround (E (f.in)) == 1;
+        ep.busPicks[(size_t) sl - 1] = E (f.picks);
     }
-    ep.wanderCents = E (T_Wander);
-    ep.wanderRate = V (ids::wanderSync) > 0.5 ? (bpm / 60.0) / syncDivBeats ((int) V (ids::wanderDiv)) : V (ids::wanderRate); ep.scramble = E (T_Scramble) / 100.0;
+    ep.wanderCents = V (ids::wander);
+    ep.wanderRate = V (ids::wanderSync) > 0.5 ? (bpm / 60.0) / beatLength ((int) std::lround (V (ids::wanderBeat))) : V (ids::wanderRate);
+    ep.scramble = V (ids::scramble) / 100.0;
     chordSize = juce::jlimit (1, 5, (int) std::lround (V (ids::chordSize)));
     chordStep = juce::jlimit (1, 12, (int) std::lround (V (ids::chordStep)));
 }
@@ -207,8 +253,8 @@ void SeedProcessor::updateScaleOnAudioThread()
     }
     if (count == 0) { hz[0] = ep.fundamentalHz; }
     for (int sl = 1; sl <= kNumFx; ++sl)
-        if ((int) std::lround (fxValue (sl, "type")) == FxRough)
-            fxSlots[(size_t) sl - 1].rough.setTuning (hz.data(), std::max (1, count), fxValue (sl, "rRough") / 100.0);
+        if ((int) std::lround (eff (fxp[(size_t) sl - 1].type)) == FxRough)
+            fxSlots[(size_t) sl - 1].rough.setTuning (hz.data(), std::max (1, count), eff (fxp[(size_t) sl - 1].rRough) / 100.0);
 }
 
 // ================================================================================================
@@ -296,6 +342,18 @@ void SeedProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     std::array<float, kMaxVoices> held {};
     const int nh = engine.heldNoteCents (held.data(), kMaxVoices);
     for (int i = 0; i < kMaxVoices; ++i) uiHeld[(size_t) i].store (i < nh ? held[(size_t) i] : std::nanf (""), std::memory_order_relaxed);
+    publishHits();
+}
+
+/// Notes struck during this block go into a ring for the UI, so even a note shorter than one screen
+/// refresh lights up (user: "the visual feedback is not consistently showing").
+void SeedProcessor::publishHits()
+{
+    std::array<float, 32> hits {};
+    const int n = engine.takeHits (hits.data(), (int) hits.size());
+    uint32_t seq = uiHitSeq.load (std::memory_order_relaxed);
+    for (int i = 0; i < n; ++i) uiHitCents[seq++ % (uint32_t) kHitRing].store (hits[(size_t) i], std::memory_order_relaxed);
+    if (n > 0) uiHitSeq.store (seq, std::memory_order_release);
 }
 
 // ================================================================================================
@@ -312,32 +370,103 @@ xen::CalculatorSettings SeedProcessor::currentCalculatorSettings() const
     c.minStrength = (effMinDip.load() >= 0.0f ? effMinDip.load() : V (ids::minDip)) / 100.0;
     c.partials = (int) std::lround (V (ids::partials));
     const int m = (int) std::lround (V (ids::method));
-    c.method = m == 1 ? xen::Method::Consonance : m == 2 ? xen::Method::Imported : xen::Method::Dissonance;
+    c.method = m == 1 ? xen::Method::Consonance : m == 2 ? xen::Method::Imported : m == 3 ? xen::Method::Edo
+             : m == 4 ? xen::Method::SeedEdo : xen::Method::Dissonance;
     c.imported = importedCents;
-    c.toleranceCents = V (ids::tolerance);
+    c.edoSteps = juce::jlimit (1, 120, (int) std::lround (V (ids::edoSteps)));
+    c.toleranceCents = effTol.load() >= 0.0f ? effTol.load() : V (ids::tolerance);
     c.minShared = (int) std::lround (V (ids::minShared));
     c.edits = partialEditsFromParams();
     return c;
 }
 
+// ---- scale lock -----------------------------------------------------------------------------------
+static juce::String rawScaleToText (const xen::RawScale& r)
+{
+    juce::String t (r.period, 9);
+    for (int i = 0; i < r.count; ++i)
+        t << ";" << juce::String (r.notes[(size_t) i].cents, 9) << "," << juce::String (r.notes[(size_t) i].strength, 6) << "," << (int) r.notes[(size_t) i].kind;
+    return t;
+}
+
+void SeedProcessor::setLockedFromText (const juce::String& text)
+{
+    lockedRaw = {};
+    const auto parts = juce::StringArray::fromTokens (text, ";", "");
+    if (parts.size() >= 3)
+    {
+        lockedRaw.period = parts[0].getDoubleValue();
+        for (int i = 1; i < parts.size() && lockedRaw.count < xen::kMaxRawNotes; ++i)
+        {
+            const auto f = juce::StringArray::fromTokens (parts[i], ",", "");
+            if (f.size() != 3) continue;
+            lockedRaw.notes[(size_t) lockedRaw.count++] = { f[0].getDoubleValue(), f[1].getDoubleValue(), (xen::ScaleNote::Kind) juce::jlimit (0, 2, f[2].getIntValue()) };
+        }
+        lockedRaw.valid = lockedRaw.count >= 2 && lockedRaw.period > 1.0;
+        if (! lockedRaw.valid) lockedRaw = {};
+    }
+    apvts.state.setProperty ("lockedScale", lockedRaw.valid ? text : juce::String(), nullptr);
+}
+
+xen::RawScale SeedProcessor::rawScaleNow() const
+{
+    if (lockedRaw.valid && scaleLocked()) return lockedRaw;
+    xen::RawScale raw;
+    raw.assign (calcOut.curve);
+    return raw;
+}
+
+void SeedProcessor::publishScale()
+{
+    const auto raw = rawScaleNow();
+    const juce::SpinLock::ScopedLockType sl (scaleLock);
+    sharedRaw = raw;
+    ++sharedVersion;
+}
+
+void SeedProcessor::setScaleLocked (bool lock)
+{
+    if (lock && calcOut.curve.valid)
+    {
+        xen::RawScale snap;
+        snap.assign (calcOut.curve);
+        setLockedFromText (rawScaleToText (snap));
+    }
+    else if (! lock) setLockedFromText ({});
+    auto* p = P (ids::scaleLock);
+    p->setValueNotifyingHost (lock ? 1.0f : 0.0f);
+    publishedLocked = scaleLocked();
+    publishScale();
+}
+
 void SeedProcessor::pumpCalculator()
 {
     worker.request (currentCalculatorSettings());
-    if (worker.fetch (calcOut, calcSeen))
+    bool changed = worker.fetch (calcOut, calcSeen);
+    // The lock parameter can also change from the host (automation, preset load): keep the snapshot in step.
+    const bool locked = scaleLocked();
+    if (locked && ! lockedRaw.valid && calcOut.curve.valid)
     {
-        xen::RawScale raw;
-        raw.assign (calcOut.curve);
-        const juce::SpinLock::ScopedLockType sl (scaleLock);
-        sharedRaw = raw;
-        ++sharedVersion;
+        xen::RawScale snap;
+        snap.assign (calcOut.curve);
+        setLockedFromText (rawScaleToText (snap));
+        changed = true;
+    }
+    else if (! locked && lockedRaw.valid)
+    {
+        setLockedFromText ({});
+        changed = true;
+    }
+    if (changed || locked != publishedLocked)
+    {
+        publishedLocked = locked;
+        publishScale();
     }
 }
 
 xen::FinalScale SeedProcessor::finalScale() const
 {
-    xen::RawScale raw;
-    raw.assign (calcOut.curve);
-    return xen::applyNoteEdits (raw, noteEditsFromParams());
+    return xen::applyNoteEdits (rawScaleNow(), noteEditsFromParams());
 }
 
 // ================================================================================================
@@ -394,8 +523,10 @@ juce::String SeedProcessor::exportScl() const
     std::sort (notes.begin(), notes.end());
     auto V = [this] (const char* id) { auto* p = P (id); return (double) p->convertFrom0to1 (p->getValue()); };
     const auto cs = currentCalculatorSettings();
-    const auto methodName = juce::StringArray { "Dissonance", "Consonance", "Imported" }[(int) cs.method];
+    const auto methodName = methodNames()[(int) cs.method];
     juce::String desc = "Seed " + juce::String (cs.seed, 4) + " (" + methodName + ")";
+    if (cs.method == xen::Method::Edo) desc = juce::String (cs.edoSteps) + "-EDO (Seed)";
+    if (cs.method == xen::Method::SeedEdo) desc = juce::String (cs.edoSteps) + " equal steps of seed " + juce::String (cs.seed, 4);
     if (cs.method == xen::Method::Imported && importedName.isNotEmpty()) desc = importedName + " (edited in Seed)";
     std::vector<std::string> comments {
         ("Seed " + juce::String (kVersion) + ": seed " + juce::String (cs.seed, 6) + ", partials " + juce::String (cs.partials)
@@ -453,6 +584,14 @@ bool SeedProcessor::savePreset (const juce::String& name)
     juce::XmlElement root ("SeedPreset");
     root.setAttribute ("version", kVersion);
     if (importedSclText.isNotEmpty()) root.setAttribute ("importedScl", importedSclText); // part of the Tuning
+    if (lockedRaw.valid && scaleLocked()) root.setAttribute ("lockedScale", rawScaleToText (lockedRaw)); // part of the Tuning
+    for (auto& l : links)
+    {
+        auto* e = root.createNewChildElement ("LINK");
+        e->setAttribute ("mod", l.mod);
+        e->setAttribute ("id", l.paramId);
+        e->setAttribute ("amount", (double) l.amount);
+    }
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
         {
@@ -483,7 +622,29 @@ bool SeedProcessor::loadPreset (const juce::File& file, Scope scope)
             const float norm = it != values.end() ? rp->convertTo0to1 ((float) it->second) : rp->getDefaultValue();
             rp->setValueNotifyingHost (norm);
         }
-    if (scope != Scope::Sound) setImportedFromText (xml->getStringAttribute ("importedScl"));
+    if (scope != Scope::Sound)
+    {
+        setImportedFromText (xml->getStringAttribute ("importedScl"));
+        setLockedFromText (xml->getStringAttribute ("lockedScale"));
+    }
+    // Modulation links follow the same split: links aimed at tuning values belong to the Tuning part.
+    std::vector<ModLink> kept;
+    for (auto& l : links)
+    {
+        const bool tuning = isTuningParam (l.paramId);
+        if ((scope == Scope::Tuning && ! tuning) || (scope == Scope::Sound && tuning)) kept.push_back (l);
+    }
+    links = kept;
+    for (auto* e : xml->getChildWithTagNameIterator ("LINK"))
+    {
+        const auto id = e->getStringAttribute ("id");
+        const bool tuning = isTuningParam (id);
+        if ((scope == Scope::Tuning && ! tuning) || (scope == Scope::Sound && tuning)) continue;
+        links.push_back ({ e->getIntAttribute ("mod"), id, (float) e->getDoubleAttribute ("amount", 100.0) });
+    }
+    absorbLegacyTargets(); // presets from v0.5 carry single mod targets instead of links
+    commitLinks();
+    publishScale();
     currentPresetName = file.getFileNameWithoutExtension();
     return true;
 }
@@ -499,8 +660,11 @@ void SeedProcessor::randomizeOne (juce::RangedAudioParameter& rp, double amount,
     if (id.endsWith ("dFb")) next = std::min (next, rp.convertTo0to1 (85.0f));
     if (id.endsWith ("mix") && id.startsWith ("fx")) next = std::min (next, rp.convertTo0to1 (70.0f)); // keep dry audible
     if (id == ids::partials) next = std::max (next, rp.convertTo0to1 (4.0f));
+    // EQ: keep dicing musical-ish (no +24 dB / Q 18 needles); Dice still moves everything else freely.
+    if (id.startsWith ("eq") && id.endsWith ("gain")) next = juce::jlimit (rp.convertTo0to1 (-12.0f), rp.convertTo0to1 (12.0f), next);
+    if (id.startsWith ("eq") && id.endsWith ("q")) next = std::min (next, rp.convertTo0to1 (6.0f));
     // Dice may land on "Imported" only when a scale was imported (else there'd be no notes).
-    if (id == ids::method && importedCents.empty()) next = std::min (next, rp.convertTo0to1 (1.0f));
+    if (id == ids::method && importedCents.empty() && std::lround (rp.convertFrom0to1 (next)) == 2) next = rp.convertTo0to1 (0.0f);
     rp.setValueNotifyingHost (next);
 }
 
@@ -508,7 +672,7 @@ void SeedProcessor::randomizeOne (juce::RangedAudioParameter& rp, double amount,
 static bool neverRandomised (const juce::String& id)
 {
     static const juce::StringArray never { ids::gain, ids::drone, ids::droneNote, ids::keysFollow, ids::bendRange,
-                                           ids::velocity, ids::fundamental };
+                                           ids::velocity, ids::fundamental, ids::scaleLock, ids::baseKey };
     return never.contains (id);
 }
 
@@ -563,34 +727,24 @@ void SeedProcessor::resetCalculatorEdits()
             if (isTuningParam (rp->getParameterID()) && isPerItem (rp->getParameterID()))
                 rp->setValueNotifyingHost (rp->getDefaultValue());
     // Modulators aimed at calculator values also "modify the calculator": remove those links.
-    for (int m = 0; m < kNumMods; ++m)
-    {
-        const int tgt = (int) mTarget[(size_t) m]->convertFrom0to1 (mTarget[(size_t) m]->getValue());
-        if (tgt == T_Seed || tgt == T_Fund || tgt == T_Rolloff || tgt == T_MinDip)
-        {
-            mTarget[(size_t) m]->setValueNotifyingHost (mTarget[(size_t) m]->getDefaultValue());
-            mDepth[(size_t) m]->setValueNotifyingHost (mDepth[(size_t) m]->getDefaultValue());
-        }
-    }
+    links.erase (std::remove_if (links.begin(), links.end(), [] (const ModLink& l) { return isTuningParam (l.paramId); }), links.end());
+    commitLinks();
 }
 
 void SeedProcessor::initAll()
 {
     for (auto* p : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p)) rp->setValueNotifyingHost (rp->getDefaultValue());
+    links.clear();
+    setLockedFromText ({});
+    commitLinks();
+    publishScale();
     currentPresetName = {};
 }
 
 // ================================================================================================
-// FX rack (v0.5)
+// FX rack (v0.5, 12 slots since v0.6)
 // ================================================================================================
-double SeedProcessor::fxValue (int slot, const char* name) const
-{
-    auto* p = apvts.getParameter (ids::fx (slot, name));
-    const auto it = targetOf.find (p);
-    return it != targetOf.end() ? eff (p, it->second) : (double) p->convertFrom0to1 (p->getValue());
-}
-
 /// Top to bottom. A slot reads either the CHAIN (the sound so far) or its own PARTIAL BUS (only
 /// the partials it picks, straight from the synth). Chain slots blend wet into the chain by Mix;
 /// partial slots ADD their wet (the picked partials are already in the dry sound). Pan / width
@@ -600,14 +754,16 @@ void SeedProcessor::processRack (int n)
     for (int sl = 1; sl <= kNumFx; ++sl)
     {
         auto& fx = fxSlots[(size_t) sl - 1];
-        const int type = (int) std::lround (fxValue (sl, "type"));
+        const auto& f = fxp[(size_t) sl - 1];
+        auto E = [this] (juce::RangedAudioParameter* p) { return eff (p); };
+        const int type = (int) std::lround (E (f.type));
         if (type != fx.lastType)
         {
             fx.delay.reset(); fx.rough.reset(); fx.chirp.reset(); fx.squash.reset(); // no stale tails
             fx.lastType = type;
         }
-        if (type == FxOff || fxValue (sl, "on") < 0.5) continue;
-        const bool partials = (int) std::lround (fxValue (sl, "in")) == 1;
+        if (type == FxOff || E (f.on) < 0.5) continue;
+        const bool partials = (int) std::lround (E (f.in)) == 1;
         const float* inL = partials ? partialBus[(size_t) sl - 1].data() : dryL.data();
         const float* inR = partials ? partialBus[(size_t) sl - 1].data() : dryR.data();
         switch (type)
@@ -615,38 +771,38 @@ void SeedProcessor::processRack (int n)
             case FxDelay:
             {
                 pvst::PartialDelay::Params dp;
-                dp.timeMs = fxValue (sl, "dSync") > 0.5 ? syncDivBeats ((int) std::lround (fxValue (sl, "dDiv"))) * 60000.0 / bpm : fxValue (sl, "dTime");
-                dp.feedback = fxValue (sl, "dFb") / 100.0;
-                dp.spiralCents = fxValue (sl, "dSpiral");
-                dp.pingPong = fxValue (sl, "dPing") / 100.0;
-                dp.tone = fxValue (sl, "dTone") / 100.0;
+                dp.timeMs = E (f.dSync) > 0.5 ? beatLength ((int) std::lround (E (f.dBeat))) * 60000.0 / bpm : E (f.dTime);
+                dp.feedback = E (f.dFb) / 100.0;
+                dp.spiralCents = E (f.dSpiral);
+                dp.pingPong = E (f.dPing) / 100.0;
+                dp.tone = E (f.dTone) / 100.0;
                 fx.delay.process (inL, inR, wetL.data(), wetR.data(), n, dp);
                 break;
             }
             case FxRough:
-                fx.rough.process (inL, inR, wetL.data(), wetR.data(), n, fxValue (sl, "rDecay"), fxValue (sl, "rDamp") / 100.0);
+                fx.rough.process (inL, inR, wetL.data(), wetR.data(), n, E (f.rDecay), E (f.rDamp) / 100.0);
                 break;
             case FxChirp:
             {
                 pvst::ChirpReverb::Params cp;
-                cp.decaySec = fxValue (sl, "cDecay"); cp.chirp = fxValue (sl, "cChirp") / 100.0;
-                cp.sizeMs = fxValue (sl, "cSize"); cp.damping = fxValue (sl, "cDamp") / 100.0;
+                cp.decaySec = E (f.cDecay); cp.chirp = E (f.cChirp) / 100.0;
+                cp.sizeMs = E (f.cSize); cp.damping = E (f.cDamp) / 100.0;
                 fx.chirp.process (inL, inR, wetL.data(), wetR.data(), n, cp);
                 break;
             }
             case FxSquash:
             {
                 pvst::SquashCompressor::Params kp;
-                kp.thresholdDb = fxValue (sl, "kThr"); kp.slope = fxValue (sl, "kSlope");
-                kp.attackMs = fxValue (sl, "kAtt"); kp.releaseMs = fxValue (sl, "kRel"); kp.makeupDb = fxValue (sl, "kMake");
+                kp.thresholdDb = E (f.kThr); kp.slope = E (f.kSlope);
+                kp.attackMs = E (f.kAtt); kp.releaseMs = E (f.kRel); kp.makeupDb = E (f.kMake);
                 fx.squash.process (inL, inR, wetL.data(), wetR.data(), n, kp);
                 break;
             }
             default: continue;
         }
-        const float mix = (float) juce::jlimit (0.0, 1.0, fxValue (sl, "mix") / 100.0);
-        const float pan = (float) juce::jlimit (-1.0, 1.0, fxValue (sl, "pan") / 100.0);
-        const float width = (float) juce::jlimit (0.0, 2.0, fxValue (sl, "width") / 100.0);
+        const float mix = (float) juce::jlimit (0.0, 1.0, E (f.mix) / 100.0);
+        const float pan = (float) juce::jlimit (-1.0, 1.0, E (f.pan) / 100.0);
+        const float width = (float) juce::jlimit (0.0, 2.0, E (f.width) / 100.0);
         const float gL = pan > 0.0f ? 1.0f - pan : 1.0f, gR = pan < 0.0f ? 1.0f + pan : 1.0f;
         for (int i = 0; i < n; ++i)
         {
@@ -679,6 +835,118 @@ void SeedProcessor::swapFxSlots (int a, int b)
             rp->setValueNotifyingHost (vb);
             other->setValueNotifyingHost (va);
         }
+    // Modulation links travel with the slot's settings.
+    auto swapPrefix = [&] (juce::String& id) {
+        for (auto& [from, to] : { std::pair { pa, pb }, std::pair { pb, pa } })
+            if (id.startsWith (from) && ! id.substring (from.length(), from.length() + 1).containsOnly ("0123456789"))
+            {
+                id = to + id.substring (from.length());
+                return;
+            }
+    };
+    for (auto& l : links) swapPrefix (l.paramId);
+    commitLinks();
+}
+
+// ================================================================================================
+// Modulation links (v0.6)
+// ================================================================================================
+juce::String SeedProcessor::linksToText (const std::vector<ModLink>& l)
+{
+    juce::StringArray parts;
+    for (auto& k : l) parts.add (juce::String (k.mod) + "|" + k.paramId + "|" + juce::String (k.amount, 3));
+    return parts.joinIntoString (";");
+}
+
+void SeedProcessor::loadLinksFromText (const juce::String& text)
+{
+    links.clear();
+    for (auto& part : juce::StringArray::fromTokens (text, ";", ""))
+    {
+        const auto f = juce::StringArray::fromTokens (part, "|", "");
+        if (f.size() != 3) continue;
+        const int m = f[0].getIntValue();
+        if (m < 1 || m > kNumMods || dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter (f[1])) == nullptr) continue;
+        links.push_back ({ m, f[1], f[2].getFloatValue() });
+    }
+    commitLinks();
+}
+
+void SeedProcessor::commitLinks()
+{
+    if ((int) links.size() > kMaxLinks) links.resize ((size_t) kMaxLinks);
+    for (size_t i = 0; i < linkSlots.size(); ++i)
+    {
+        auto& sl = linkSlots[i];
+        sl.param.store (-1, std::memory_order_relaxed); // never let the audio thread see a half-written slot
+        if (i >= links.size()) continue;
+        auto* p = apvts.getParameter (links[i].paramId);
+        if (p == nullptr) continue;
+        sl.mod.store (links[i].mod, std::memory_order_relaxed);
+        sl.amount.store (links[i].amount, std::memory_order_relaxed);
+        sl.param.store (p->getParameterIndex(), std::memory_order_release);
+    }
+    apvts.state.setProperty ("modLinks", linksToText (links), nullptr);
+    ++linksEpoch;
+}
+
+std::vector<SeedProcessor::ModLink> SeedProcessor::modLinks() const { return links; }
+
+bool SeedProcessor::addModLink (int mod, const juce::String& paramId, float amountPercent)
+{
+    if (mod < 1 || mod > kNumMods || (int) links.size() >= kMaxLinks) return false;
+    if (dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter (paramId)) == nullptr) return false;
+    for (auto& l : links) if (l.mod == mod && l.paramId == paramId) return false;
+    links.push_back ({ mod, paramId, juce::jlimit (-100.0f, 100.0f, amountPercent) });
+    commitLinks();
+    return true;
+}
+
+void SeedProcessor::removeModLink (int mod, const juce::String& paramId)
+{
+    links.erase (std::remove_if (links.begin(), links.end(), [&] (const ModLink& l) { return l.mod == mod && l.paramId == paramId; }), links.end());
+    commitLinks();
+}
+
+void SeedProcessor::setModLinkAmount (int mod, const juce::String& paramId, float amountPercent)
+{
+    for (auto& l : links)
+        if (l.mod == mod && l.paramId == paramId) l.amount = juce::jlimit (-100.0f, 100.0f, amountPercent);
+    commitLinks();
+}
+
+void SeedProcessor::clearModLinks() { links.clear(); commitLinks(); }
+
+unsigned SeedProcessor::modMaskFor (const juce::String& paramId) const
+{
+    unsigned mask = 0;
+    for (auto& l : links) if (l.paramId == paramId) mask |= 1u << (l.mod - 1);
+    return mask;
+}
+
+float SeedProcessor::modOffsetNorm (const juce::RangedAudioParameter& p) const
+{
+    return uiModOffset[(size_t) p.getParameterIndex()].load (std::memory_order_relaxed);
+}
+
+/// v0.5 projects and presets had ONE target per modulator (a choice parameter). Turn those into
+/// links (amount 100 %, same maths) and clear the old parameter.
+void SeedProcessor::absorbLegacyTargets()
+{
+    bool any = false;
+    for (int m = 1; m <= kLegacyMods; ++m)
+    {
+        auto* tp = mTarget[(size_t) m - 1];
+        const int idx = (int) std::lround (tp->convertFrom0to1 (tp->getValue()));
+        if (idx <= 0 || idx >= (int) targetParams.size() || targetParams[(size_t) idx] == nullptr) continue;
+        const auto id = targetParams[(size_t) idx]->getParameterID();
+        bool have = false;
+        for (auto& l : links) have |= (l.mod == m && l.paramId == id);
+        if (! have) links.push_back ({ m, id, 100.0f });
+        tp->setValueNotifyingHost (tp->getDefaultValue());
+        any = true;
+    }
+    if (any) commitLinks();
 }
 
 // ================================================================================================
@@ -701,6 +969,11 @@ void SeedProcessor::setStateInformation (const void* data, int sizeInBytes)
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
             currentPresetName = apvts.state.getProperty ("presetName").toString();
             setImportedFromText (apvts.state.getProperty ("importedScl").toString());
+            setLockedFromText (apvts.state.getProperty ("lockedScale").toString());
+            loadLinksFromText (apvts.state.getProperty ("modLinks").toString());
+            absorbLegacyTargets();
+            publishedLocked = false;
+            publishScale();
         }
 }
 

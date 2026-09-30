@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 
+#include "dsp/Eq.h"
 #include "xen/CalcModel.h"
 #include "xen/Stretch.h"
 
@@ -30,7 +31,12 @@ constexpr int kMaxVoices = 16;
 constexpr int kControlBlock = 32;
 constexpr int kMaxPlayable = xen::kMaxFinalNotes;
 constexpr double kC4 = 261.6255653005986;
-constexpr int kBuses = 5; // one partial bus per FX slot
+constexpr int kBuses = 12; // one partial bus per FX rack slot (= kNumFx)
+constexpr int kEqBands = 5;
+/// Below this envelope level (-100 dB) a voice is finished. The end is a fade to (practically)
+/// nothing, not a cut: -100 dB of a voice is ~-112 dBFS, far under anything a DAC can reproduce.
+/// (v0.6: the old threshold was -60 dB, a step the user heard as "the release just cuts off".)
+constexpr float kSilence = 1e-5f;
 
 enum KeyMode { Keys12 = 0, KeysSeed12 = 1, KeysScale = 2, KeysMagnet = 3 };
 enum FilterMode { FilterOff = 0, FilterLP, FilterBP, FilterHP, FilterNotch };
@@ -48,6 +54,7 @@ struct EngineParams
     // Keys + pitch.
     int keyMode = Keys12;
     double magnet = 1.0, life = 0.0, glideMs = 40.0, pitchCents = 0.0, fshiftHz = 0.0, bendCents = 0.0;
+    int baseKey = 60; // the key that plays the unison (Scale / Magnet / Seed-12 modes)
     // Additive timbre tools.
     double tiltDbOct = 0.0, oddEven = 0.0, spread = 0.0, shimmer = 0.0, shimmerRate = 1.5;
     double formFreq = 1000.0, formGainDb = 0.0, formWidth = 1.0;
@@ -55,6 +62,9 @@ struct EngineParams
     double noiseDb = -60.0;
     int filterMode = FilterOff;
     double cutoff = 4000.0, reso = 0.2, keyTrack = 0.0, filterEnvOct = 0.0, filterDecayMs = 300.0;
+    // 5-band EQ, per voice, key-trackable (keyTrack 0..1 per band: 1 = the band follows the note).
+    std::array<pvst::eq::Band, kEqBands> eq {};
+    std::array<double, kEqBands> eqKeyTrack {};
     // Partial buses (one per FX slot): used or not, and which partials they pick. picks is a
     // continuous position over the rules (1.5 = halfway between Odd and Even).
     std::array<bool, kBuses> busOn {};
@@ -103,6 +113,7 @@ public:
         v->active = true;
         v->age = ++ageCounter;
         v->fenv = 1.0f;
+        if (numHits < (int) pendingHits.size()) pendingHits[(size_t) numHits++] = note; // for the UI's "a note was played" latch
         if (wasSilent)
         {
             v->env = 0.0f;
@@ -113,6 +124,7 @@ public:
                 v->shimPhase[i] = (float) (hash (p, 7) * 6.2831853);
             }
             v->f1L = v->f2L = v->f1R = v->f2R = 0.0f;
+            for (auto& band : v->eqSt) for (auto& sec : band) for (auto& ch : sec) ch = pvst::eq::State {};
         }
         tickCountdown = 0; // compute this voice before its first sample
     }
@@ -151,6 +163,22 @@ public:
         int n = 0;
         for (auto& v : voices)
             if (v.active && v.stage != Voice::Release && n < maxOut) out[n++] = (float) v.keyRelCents;
+        return n;
+    }
+
+    /// Notes struck since the last call, as cents above the Fundamental (same meaning as
+    /// heldNoteCents). Lets the UI light up notes that were shorter than one screen refresh.
+    int takeHits (float* out, int maxOut)
+    {
+        int n = 0;
+        const double anchor = 1200.0 * std::log2 (s.fundamentalHz / kC4);
+        for (int i = 0; i < numHits && n < maxOut; ++i)
+        {
+            double cents, strength;
+            keyTarget (pendingHits[(size_t) i], cents, strength);
+            out[n++] = (float) (cents - anchor);
+        }
+        numHits = 0;
         return n;
     }
 
@@ -200,6 +228,11 @@ private:
         alignas (32) std::array<float, kOsc> re {}, im {}, c {}, s {};
         alignas (32) std::array<float, kOsc> amp {}, ampStep {}, ampSm {}, panL {}, panR {}, shimPhase {};
         alignas (32) std::array<std::array<float, kOsc>, kBuses> w {}; // partial-bus weights
+        // 5-band EQ: coefficients for this note (key tracking) and filter states [band][section][channel].
+        std::array<pvst::eq::Coefs, kEqBands> eqc {};
+        std::array<std::array<std::array<pvst::eq::State, 2>, pvst::eq::kMaxSections>, kEqBands> eqSt {};
+        std::array<int, kEqBands> eqIdx {};
+        int eqNum = 0;
     };
 
     static double hash (int a, int b)
@@ -265,6 +298,16 @@ private:
             s.busOn[(size_t) b] = t.busOn[(size_t) b];
             s.busPicks[(size_t) b] = smooth (s.busPicks[(size_t) b], t.busPicks[(size_t) b]); // glides, no clicks
         }
+        s.baseKey = t.baseKey;
+        for (int b = 0; b < kEqBands; ++b)
+        {
+            auto& sb = s.eq[(size_t) b]; const auto& tb = t.eq[(size_t) b];
+            sb.on = tb.on; sb.type = tb.type; sb.steep = tb.steep;
+            sb.freq = smoothLog (sb.freq, tb.freq);
+            sb.gainDb = smooth (sb.gainDb, tb.gainDb);
+            sb.q = smoothLog (sb.q, tb.q);
+            s.eqKeyTrack[(size_t) b] = smooth (s.eqKeyTrack[(size_t) b], t.eqKeyTrack[(size_t) b]);
+        }
         s.wanderCents = smooth (s.wanderCents, t.wanderCents);
         s.wanderRate = t.wanderRate;
         s.scramble = smooth (s.scramble, t.scramble);
@@ -276,7 +319,7 @@ private:
         const double period = xen::periodCents (std::max (1e-9, s.seed));
         const double anchor = 1200.0 * std::log2 (s.fundamentalHz / kC4); // key 60 = Fundamental
         strength01 = 1.0;
-        const int d = note - 60;
+        const int d = note - s.baseKey; // keys counted from the base key (default C4 = 60)
         const double absPeriod = numPlayable > 0 ? scalePeriod : std::abs (period);
         switch (s.keyMode)
         {
@@ -313,7 +356,7 @@ private:
                 }
                 break;
             case Keys12:
-                cents = d * 100.0;
+                cents = (note - 60) * 100.0; // normal tuning: independent of the base key
                 return;
             default: break;
         }
@@ -355,8 +398,21 @@ private:
         const double glideCoef = s.glideMs <= 0.5 ? 0.0 : std::exp (-tickSec / (s.glideMs * 0.001));
         const float fenvCoef = (float) std::exp (-tickSec / std::max (0.001, s.filterDecayMs * 0.001));
         const float noiseAmp = s.noiseDb <= -59.9 ? 0.0f : (float) (0.5 * std::pow (10.0, s.noiseDb / 20.0));
-        hasSends = false;
-        for (int b = 0; b < kBuses; ++b) hasSends |= s.busOn[(size_t) b];
+        numActiveBus = 0;
+        for (int b = 0; b < kBuses; ++b)
+            if (s.busOn[(size_t) b]) activeBus[(size_t) numActiveBus++] = b;
+        hasSends = numActiveBus > 0;
+
+        // EQ: bands that do something; key-tracked ones are recomputed per voice, the rest once.
+        std::array<pvst::eq::Coefs, kEqBands> eqStatic {};
+        std::array<bool, kEqBands> eqLive {};
+        for (int b = 0; b < kEqBands; ++b)
+        {
+            const auto ub = (size_t) b;
+            eqLive[ub] = s.eq[ub].active();
+            if (eqLive[ub]) eqStatic[ub] = pvst::eq::makeCoefs (s.eq[ub], s.eq[ub].freq, sr);
+        }
+        const double eqAnchor = 1200.0 * std::log2 (s.fundamentalHz / kC4);
 
         // Wander: every partial walks its own bounded random path (shared by all voices).
         if (s.wanderCents > 1e-3)
@@ -471,7 +527,7 @@ private:
                 v.s[ii] = (float) std::sin (w);
                 v.panL[ii] = (float) panL[ii];
                 v.panR[ii] = (float) panR[ii];
-                for (int b = 0; b < kBuses; ++b) v.w[(size_t) b][ii] = (float) busW[(size_t) b][ii];
+                for (int k = 0; k < numActiveBus; ++k) { const auto b = (size_t) activeBus[(size_t) k]; v.w[b][ii] = (float) busW[b][ii]; }
             }
             const double norm = power > 1e-12 ? 1.0 / std::sqrt (power) : 0.0;
 
@@ -498,6 +554,21 @@ private:
                 v.fa1 = 1.0f / (1.0f + v.fg * (v.fg + v.fk));
                 v.fa2 = v.fg * v.fa1;
                 v.fa3 = v.fg * v.fa2;
+            }
+            // EQ: the band's frequency follows the note by keyTrack (0 = fixed, 1 = one octave up per octave).
+            v.eqNum = 0;
+            for (int b = 0; b < kEqBands; ++b)
+            {
+                const auto ub = (size_t) b;
+                if (! eqLive[ub])
+                {
+                    for (auto& sec : v.eqSt[ub]) for (auto& ch : sec) ch = pvst::eq::State {}; // no stale state when re-enabled
+                    continue;
+                }
+                v.eqc[ub] = s.eqKeyTrack[ub] > 1e-4
+                              ? pvst::eq::makeCoefs (s.eq[ub], pvst::eq::trackedFreq (s.eq[ub].freq, s.eqKeyTrack[ub], v.cents - eqAnchor), sr)
+                              : eqStatic[ub];
+                v.eqIdx[(size_t) v.eqNum++] = b;
             }
             v.fenv *= fenvCoef;
             v.fresh = false;
@@ -529,10 +600,9 @@ private:
         const float* c = v.c.data(); const float* s_ = v.s.data();
         float* amp = v.amp.data(); const float* step = v.ampStep.data();
         const float* pl = v.panL.data(); const float* pr = v.panR.data();
-        const float* w0 = v.w[0].data(); const float* w1 = v.w[1].data(); const float* w2 = v.w[2].data();
-        const float* w3 = v.w[3].data(); const float* w4 = v.w[4].data();
         const float gain = v.velGain * v.lifeGain * masterGain;
         const bool filt = s.filterMode != FilterOff;
+        alignas (32) float xs[kOsc];
 
         for (int i = 0; i < n; ++i)
         {
@@ -544,36 +614,50 @@ private:
             else if (v.stage == Voice::Decay)
             {
                 v.env = sustainLevel + (v.env - sustainLevel) * decayCoef;
-                if (sustainLevel <= 0.0f && v.env < 0.001f) { v.active = false; v.env = 0.0f; return; }
+                if (sustainLevel <= 0.0f && v.env < kSilence) { v.active = false; v.env = 0.0f; return; }
             }
             else
             {
                 v.env *= releaseCoef;
-                if (v.env < 0.001f) { v.active = false; v.env = 0.0f; return; }
+                if (v.env < kSilence) { v.active = false; v.env = 0.0f; return; }
             }
 
-            float sl = 0.0f, sr_ = 0.0f, b0 = 0.0f, b1 = 0.0f, b2 = 0.0f, b3 = 0.0f, b4 = 0.0f;
+            float sl = 0.0f, sr_ = 0.0f;
             for (int p = 0; p < P; ++p)
             {
                 const float r = re[p] * c[p] - im[p] * s_[p];
                 im[p] = re[p] * s_[p] + im[p] * c[p];
                 re[p] = r;
                 const float x = amp[p] * im[p];
+                xs[p] = x;
                 sl += x * pl[p];
                 sr_ += x * pr[p];
-                if constexpr (Sends) { b0 += x * w0[p]; b1 += x * w1[p]; b2 += x * w2[p]; b3 += x * w3[p]; b4 += x * w4[p]; }
                 amp[p] += step[p];
             }
             if (v.noiseAmp > 0.0f) { sl += v.noiseAmp * rnd (v.rng); sr_ += v.noiseAmp * rnd (v.rng); }
             if (filt) { sl = svf (sl, v.f1L, v.f2L, v); sr_ = svf (sr_, v.f1R, v.f2R, v); }
+            for (int e = 0; e < v.eqNum; ++e)
+            {
+                const auto b = (size_t) v.eqIdx[(size_t) e];
+                const auto& cf = v.eqc[b];
+                for (int k = 0; k < cf.n; ++k)
+                {
+                    sl = pvst::eq::tick (cf.s[(size_t) k], v.eqSt[b][(size_t) k][0], sl);
+                    sr_ = pvst::eq::tick (cf.s[(size_t) k], v.eqSt[b][(size_t) k][1], sr_);
+                }
+            }
             const float g = v.env * gain;
             dL[i] += sl * g;
             dR[i] += sr_ * g;
             if constexpr (Sends)
-            {
-                buses[0][offset + i] += b0 * g; buses[1][offset + i] += b1 * g; buses[2][offset + i] += b2 * g;
-                buses[3][offset + i] += b3 * g; buses[4][offset + i] += b4 * g;
-            }
+                for (int k = 0; k < numActiveBus; ++k)
+                {
+                    const int bus = activeBus[(size_t) k];
+                    const float* w = v.w[(size_t) bus].data();
+                    float acc = 0.0f;
+                    for (int p = 0; p < P; ++p) acc += xs[p] * w[p];
+                    buses[bus][offset + i] += acc * g;
+                }
         }
     }
 
@@ -617,6 +701,10 @@ private:
     uint64_t ageCounter = 0;
     int tickCountdown = 0;
     bool hasSends = false;
+    std::array<int, kBuses> activeBus {};
+    int numActiveBus = 0;
+    std::array<int, 32> pendingHits {};
+    int numHits = 0;
     float masterGain = 0.25f, attackStep = 0.001f, decayCoef = 0.999f, releaseCoef = 0.999f, sustainLevel = 0.6f;
 };
 } // namespace seed

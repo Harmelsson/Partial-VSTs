@@ -1,12 +1,15 @@
 #pragma once
-// Seed's window (v0.3 playground), ArtHar's dark style:
+// Seed's window, ArtHar's dark style (v0.6 layout):
 //   header      name, PRESETS (< name > Save, load scope All/Tuning/Sound), version
-//   CALCULATOR  fundamental, seed, partials, rolloff, method + its settings, Reset edits,
+//   CALCULATOR  fundamental, seed, partials, rolloff, method + its settings, Lock scale, Reset edits,
 //               Dice tuning; curve / partials plots (editable) and the scale table (on/off)
-//   SYNTH       tabs: Keys & pitch | Envelope | Timbre | Filter & noise | FX | Modulators,
-//               plus Mutate / Dice sound
+//   SYNTH       tabs: Keys & pitch | Envelope | Timbre | FX (rack + 5-band EQ), plus Dice / Mutate / Reset page
+//   MODULATORS  a column on the right: 8 modulators, dragged onto fields to link them
 // The editor only draws and edits parameters; the calculator itself lives in the processor.
+#include "EqView.h"
 #include "FxRackView.h"
+#include "Help.h"
+#include "ModPanel.h"
 #include "PluginProcessor.h"
 #include "ui/CalculatorViews.h"
 #include "ui/Controls.h"
@@ -38,28 +41,23 @@ private:
     juce::Component* filler = nullptr;
 };
 
-/// Small live meter showing a modulator's current output.
-class ModMeter : public juce::Component
+/// The FX tab: the rack (list + slot settings) on the left, the 5-band EQ on the right.
+class FxPage : public juce::Component
 {
 public:
-    explicit ModMeter (std::atomic<float>& v) : value (v) {}
-    void tick() { const float v = value.load(); if (! juce::exactlyEqual (v, shown)) { shown = v; repaint(); } }
-    void paint (juce::Graphics& g) override
+    explicit FxPage (SeedProcessor& p) : rack (p), eq (p) { addAndMakeVisible (rack); addAndMakeVisible (eq); }
+    void resized() override
     {
-        auto b = getLocalBounds().withTrimmedTop (19).withHeight (28).toFloat();
-        g.setColour (pvst::theme::boxFill()); g.fillRect (b);
-        g.setColour (pvst::theme::frame()); g.drawRect (b, 1.0f);
-        const float cx = b.getCentreX(), w = b.getWidth() * 0.5f * shown;
-        g.setColour (pvst::theme::mix (0.6f));
-        g.fillRect (juce::Rectangle<float> (juce::jmin (cx, cx + w), b.getY() + 4, std::abs (w), b.getHeight() - 8));
-        g.setColour (pvst::theme::frame()); g.drawVerticalLine ((int) cx, b.getY(), b.getBottom());
+        auto b = getLocalBounds().reduced (4, 4);
+        eq.setBounds (b.removeFromRight (548));
+        b.removeFromRight (12);
+        rack.setBounds (b);
     }
-private:
-    std::atomic<float>& value;
-    float shown = 0.0f;
+    FxRackView rack;
+    EqView eq;
 };
 
-class SeedEditor : public juce::AudioProcessorEditor, private juce::Timer
+class SeedEditor : public juce::AudioProcessorEditor, public juce::DragAndDropContainer, public pvst::ModDropHandler, private juce::Timer
 {
 public:
     explicit SeedEditor (SeedProcessor&);
@@ -68,6 +66,12 @@ public:
     void resized() override;
     bool hasCalculatorResult() const { return proc.hasCalculatorResult(); }
     void showTab (int index);
+
+    // pvst::ModDropHandler: a modulator chip dropped on a number box links it.
+    void modDroppedOn (juce::RangedAudioParameter& prm, int mod) override;
+    unsigned modMaskFor (const juce::RangedAudioParameter& prm) override { return proc.modMaskFor (prm.getParameterID()); }
+    float modOffsetNorm (const juce::RangedAudioParameter& prm) override { return proc.modOffsetNorm (prm); }
+    void modRemoveFrom (juce::RangedAudioParameter& prm, int mod) override { proc.removeModLink (mod, prm.getParameterID()); }
 
 private:
     void timerCallback() override;
@@ -88,9 +92,10 @@ private:
     SeedProcessor::Scope loadScope = SeedProcessor::Scope::All;
 
     // Calculator.
-    pvst::ScrubBox fundamentalBox, seedBox, partialsBox, rolloffBox, minDipBox, toleranceBox, minSharedBox;
-    pvst::SegmentedChoice methodSeg;
-    pvst::FlatButton resetEdits { "Reset edits" }, diceTuning { "Dice tuning" };
+    pvst::ScrubBox fundamentalBox, seedBox, partialsBox, rolloffBox, minDipBox, toleranceBox, minSharedBox, edoStepsBox;
+    pvst::ChoiceBox methodBox;
+    pvst::FlatButton resetEdits { "Reset edits" }, diceTuning { "Dice tuning" }, lockScale { "Lock scale" };
+    void onLockClicked();
     // Scala (v0.5): import a scale / export what the keyboard plays / fit the seed to the scale.
     pvst::FlatButton importScl { "Import .scl" }, exportScl { "Export .scl" }, fitSeed { "Fit seed" };
     std::unique_ptr<juce::FileChooser> chooser;
@@ -102,9 +107,12 @@ private:
     pvst::ScaleTable scaleTable;
     pvst::PartialsTable partialsTable;
     std::vector<float> emphasis; // per FinalScale note: lit while played (ArtHar style)
+    uint32_t hitsSeen = 0;                 // how many note-on events from the processor's ring were handled
+    std::vector<double> litUntil;          // per FinalScale note: a struck note stays lit at least this long (ms)
 
     // Synth.
-    static constexpr int kTabs = 6;
+    static constexpr int kTabs = 4;
+    static constexpr int kMainW = 1240, kModW = 340;
     std::array<std::unique_ptr<pvst::FlatButton>, kTabs> tabButtons;
     std::array<ControlPage, kTabs> pages;
     int currentTab = 0;
@@ -113,9 +121,10 @@ private:
     std::array<juce::StringArray, kTabs> pageIds; // which parameters live on each page
     int shownMethod = -1;
     std::vector<std::unique_ptr<juce::Component>> owned; // controls living on the pages
-    std::vector<ModMeter*> meters;
     pvst::EnvelopeView* envelopeView = nullptr;
-    FxRackView* fxRack = nullptr;
+    FxPage* fxPage = nullptr;
+    ModPanel modPanel;
+    juce::TooltipWindow tooltipWindow { this, 600 };
 
     juce::Rectangle<int> calcArea, synthArea;
     juce::String info;

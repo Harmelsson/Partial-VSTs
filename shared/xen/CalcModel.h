@@ -23,9 +23,9 @@ namespace xen
 {
 inline constexpr int kSeriesPartials = 64;
 inline constexpr int kCustomPartials = 8;
-inline constexpr int kEditableDegrees = 32;
+inline constexpr int kEditableDegrees = 120; // v0.6: EDO / Seed-EDO scales have up to 119 notes per period
 inline constexpr int kCustomNotes = 8;
-inline constexpr int kMaxRawNotes = 64;
+inline constexpr int kMaxRawNotes = 128;
 inline constexpr int kMaxFinalNotes = kMaxRawNotes + kCustomNotes;
 inline constexpr double kMuteDb = -60.0;
 

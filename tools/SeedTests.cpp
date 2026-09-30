@@ -18,6 +18,7 @@
 #include "PluginEditor.h"
 #include "xen/Stretch.h"
 #include "xen/CalculatorWorker.h"
+#include "dsp/Eq.h"
 
 namespace
 {
@@ -502,7 +503,13 @@ void testChaosSafety()
     r.set (fx (3, "mix"), 100.0f); r.set (fx (3, "cDecay"), 20.0f); r.set (fx (3, "cChirp"), 100.0f);
     r.set (fx (4, "kSlope"), -1.0f); r.set (fx (4, "kMake"), 24.0f); r.set (fx (4, "kThr"), -40.0f);
     r.set (fx (5, "type"), (float) seed::FxChirp); r.set (fx (5, "mix"), 100.0f); r.set (fx (5, "in"), 1.0f);
-    r.set (seed::ids::filterMode, 2.0f); r.set (seed::ids::reso, 100.0f); r.set (seed::ids::noise, 0.0f);
+    // The 5-band EQ at its most extreme: every band on, +24 dB, Q 18, key-tracked.
+    for (int b = 1; b <= seed::kEqBands; ++b)
+    {
+        using seed::ids::eq;
+        r.set (eq (b, "on"), 1.0f); r.set (eq (b, "gain"), 24.0f); r.set (eq (b, "q"), 18.0f); r.set (eq (b, "kt"), 100.0f);
+        r.set (eq (b, "type"), (float) (b % pvst::eq::kNumTypes));
+    }
     r.settleCalculator();
     auto x = r.render (3.0, Rig::noteOn ({ 36, 48, 60, 64, 67, 72 }, 1.0f));
     check (allFinite (x) && peakOf (x) <= pvst::SafetyStage::kCeiling + 1e-6f, "worst-case FX: finite, under the ceiling",
@@ -526,7 +533,7 @@ void testChaosSafety()
 
     // A modulator on the seed actually moves the calculator.
     Rig m;
-    m.set (seed::ids::modTarget (1), 1.0f); // Seed
+    m.proc->addModLink (1, seed::ids::seed); // Seed
     m.set (seed::ids::modShape (1), 3.0f);  // Square
     m.set (seed::ids::modRate (1), 0.25f);
     m.set (seed::ids::modDepth (1), 100.0f);
@@ -601,12 +608,12 @@ void testV04()
     r.set (seed::ids::noteOn (2), 0.0f);
     r.set (seed::ids::partialLevel (4), -20.0f);
     r.set (seed::ids::partialInScale (5), 0.0f);
-    r.set (seed::ids::modTarget (1), 1.0f); r.set (seed::ids::modDepth (1), 50.0f);   // -> Seed
-    r.set (seed::ids::modTarget (2), 14.0f); r.set (seed::ids::modDepth (2), 50.0f);  // -> Cutoff
+    r.proc->addModLink (1, seed::ids::seed); r.set (seed::ids::modDepth (1), 50.0f);       // -> Seed
+    r.proc->addModLink (2, seed::ids::eq (1, "freq")); r.set (seed::ids::modDepth (2), 50.0f);     // -> Cutoff
     r.proc->resetCalculatorEdits();
     auto v = [&r] (const juce::String& id) { auto* p = r.proc->apvts.getParameter (id); return p->convertFrom0to1 (p->getValue()); };
     check (v (seed::ids::noteOn (2)) > 0.5f && std::abs (v (seed::ids::partialLevel (4))) < 1e-4f && v (seed::ids::partialInScale (5)) > 0.5f
-               && v (seed::ids::modTarget (1)) < 0.5f && v (seed::ids::modTarget (2)) > 13.5f,
+               && r.proc->modMaskFor (seed::ids::seed) == 0u && r.proc->modMaskFor (seed::ids::eq (1, "freq")) == 2u,
            "Reset edits: edits + ticks + seed modulator cleared, cutoff modulator kept");
 
     // 0 ms attack: full level almost at once.
@@ -676,14 +683,14 @@ void testV05()
     {
         Rig r;
         r.set (seed::ids::release, 0.0f); r.set (seed::ids::attack, 0.0f);
-        r.set (fx (1, "mix"), 100.0f); r.set (fx (1, "dFb"), 0.0f); r.set (fx (1, "dSync"), 1.0f); r.set (fx (1, "dDiv"), 4.0f);
+        r.set (fx (1, "mix"), 100.0f); r.set (fx (1, "dFb"), 0.0f); r.set (fx (1, "dSync"), 1.0f); r.set (fx (1, "dBeat"), 15.0f); // 4/16 = one beat = 500 ms at 120 BPM
         r.set (fx (1, "picks"), 0.0f); r.set (fx (1, "dPing"), 0.0f);
         r.render (0.05, Rig::noteOn ({ 69 }));
         r.render (0.001, Rig::noteOff (69));
         auto x = r.render (0.8);
         const std::vector<float> before (x.begin() + (long) (0.30 * kSr), x.begin() + (long) (0.40 * kSr));
         const std::vector<float> at (x.begin() + (long) (0.45 * kSr), x.begin() + (long) (0.50 * kSr));
-        check (peakOf (before) < 1e-3f && peakOf (at) > 0.01f, "delay synced to 1/4 at 120 BPM echoes after 500 ms");
+        check (peakOf (before) < 1e-3f && peakOf (at) > 0.01f, "delay synced to 4/16 at 120 BPM echoes after 500 ms");
     }
     // Squash: over-compression makes a loud chord QUIETER than a transparent slot.
     auto level = [] (float slope) {
@@ -704,22 +711,22 @@ void testPresets()
     Rig a;
     a.set (seed::ids::seed, 2.7f);
     a.set (seed::ids::noteOn (3), 0.0f);
-    a.set (seed::ids::cutoff, 555.0f);
-    a.set (seed::ids::filterMode, 1.0f);
+    a.set (seed::ids::eq (1, "freq"), 555.0f);
+    a.set (seed::ids::eq (1, "on"), 1.0f);
     check (a.proc->savePreset (name), "save preset");
     const auto file = folder.getChildFile (name + ".seedpreset");
 
-    Rig t; // Tuning only: seed + note edit come in, the filter stays as it was.
-    t.set (seed::ids::cutoff, 3000.0f);
+    Rig t; // Tuning only: seed + note edit come in, the EQ stays as it was.
+    t.set (seed::ids::eq (1, "freq"), 3000.0f);
     t.proc->loadPreset (file, SeedProcessor::Scope::Tuning);
     auto val = [&t] (const juce::String& id) { auto* p = t.proc->apvts.getParameter (id); return p->convertFrom0to1 (p->getValue()); };
-    check (std::abs (val (seed::ids::seed) - 2.7f) < 1e-3 && val (seed::ids::noteOn (3)) < 0.5f && std::abs (val (seed::ids::cutoff) - 3000.0f) < 1.0f,
+    check (std::abs (val (seed::ids::seed) - 2.7f) < 1e-3 && val (seed::ids::noteOn (3)) < 0.5f && std::abs (val (seed::ids::eq (1, "freq")) - 3000.0f) < 1.0f,
            "load Tuning only: tuning + edits in, sound untouched");
     Rig s; // Sound only.
     s.proc->loadPreset (file, SeedProcessor::Scope::Sound);
     auto val2 = [&s] (const juce::String& id) { auto* p = s.proc->apvts.getParameter (id); return p->convertFrom0to1 (p->getValue()); };
-    check (std::abs (val2 (seed::ids::seed) - 2.0f) < 1e-3 && std::abs (val2 (seed::ids::cutoff) - 555.0f) < 1.0f,
-           "load Sound only: filter in, seed untouched");
+    check (std::abs (val2 (seed::ids::seed) - 2.0f) < 1e-3 && std::abs (val2 (seed::ids::eq (1, "freq")) - 555.0f) < 1.0f,
+           "load Sound only: EQ in, seed untouched");
     file.deleteFile();
 }
 
@@ -799,6 +806,325 @@ void testScala()
            q.proc->importedScaleName() + ", " + juce::String (q.proc->finalScale().count) + " notes incl. period");
 }
 
+// ================================================================================================
+// v0.6
+// ================================================================================================
+/// Edits a saved state like an OLD (pre-v0.6) project: no links, and raw parameter values (the state
+/// XML stores PLAIN values: a choice is its index).
+juce::MemoryBlock oldStyleState (SeedProcessor& proc, std::initializer_list<std::pair<const char*, double>> plainValues)
+{
+    juce::MemoryBlock mb;
+    proc.getStateInformation (mb);
+    auto xml = juce::AudioProcessor::getXmlFromBinary (mb.getData(), (int) mb.getSize());
+    xml->removeAttribute ("modLinks"); // a v0.5 project has no links
+    for (auto& [id, v] : plainValues)
+        for (auto* e : xml->getChildWithTagNameIterator ("PARAM"))
+            if (e->getStringAttribute ("id") == id) e->setAttribute ("value", v);
+    juce::MemoryBlock out;
+    juce::AudioProcessor::copyXmlToBinary (*xml, out);
+    return out;
+}
+
+void testEqMaths()
+{
+    std::cout << "EQ maths (Cytomic SVF sections)" << std::endl;
+    using namespace pvst::eq;
+    auto db = [] (const Coefs& c, double f) { return 20.0 * std::log10 (magnitude (c, f, kSr)); };
+    Band bell; bell.on = true; bell.type = Bell; bell.freq = 1000; bell.gainDb = 12; bell.q = 2;
+    const auto cb = makeCoefs (bell, 1000.0, kSr);
+    check (std::abs (db (cb, 1000.0) - 12.0) < 0.05 && std::abs (db (cb, 20.0)) < 0.3 && std::abs (db (cb, 18000.0)) < 0.6,
+           "bell +12 dB at 1 kHz: +12 at the centre, flat far away", juce::String (db (cb, 1000.0), 2) + " dB");
+    Band cut; cut.on = true; cut.type = LowCut; cut.freq = 1000; cut.q = 0.7071;
+    cut.steep = 1; const auto c12 = makeCoefs (cut, 1000.0, kSr);
+    cut.steep = 4; const auto c48 = makeCoefs (cut, 1000.0, kSr);
+    check (std::abs (db (c12, 250.0) + 24.3) < 1.5 && db (c48, 250.0) < -85.0 && std::abs (db (c48, 1000.0) + 3.0) < 0.6,
+           "low cut: 12 dB/oct = -24 dB two octaves down, 48 dB/oct = -96; -3 dB at the corner",
+           juce::String (db (c12, 250.0), 1) + " / " + juce::String (db (c48, 250.0), 1) + " / " + juce::String (db (c48, 1000.0), 2));
+    Band hc = cut; hc.type = HighCut; hc.steep = 2; hc.q = 0.7071;
+    const auto chc = makeCoefs (hc, 1000.0, kSr);
+    check (std::abs (db (chc, 1000.0) + 3.0) < 0.6 && db (chc, 4000.0) < -44.0 && std::abs (db (chc, 50.0)) < 0.1, "high cut 24 dB/oct");
+    Band shelf; shelf.on = true; shelf.type = LowShelf; shelf.freq = 200; shelf.gainDb = 9; shelf.q = 0.7071;
+    const auto cs = makeCoefs (shelf, 200.0, kSr);
+    shelf.type = HighShelf; shelf.freq = 5000; const auto ch = makeCoefs (shelf, 5000.0, kSr);
+    check (std::abs (db (cs, 30.0) - 9.0) < 0.3 && std::abs (db (cs, 10000.0)) < 0.3 && std::abs (db (ch, 18000.0) - 9.0) < 0.6 && std::abs (db (ch, 100.0)) < 0.3,
+           "low shelf / high shelf +9 dB");
+    Band notch; notch.on = true; notch.type = Notch; notch.freq = 2000; notch.q = 4;
+    Band bp = notch; bp.type = BandPass;
+    check (db (makeCoefs (notch, 2000.0, kSr), 2000.0) < -60.0 && std::abs (db (makeCoefs (bp, 2000.0, kSr), 2000.0)) < 0.2, "notch is deep, band-pass is unity at the centre");
+    check (makeCoefs (Band {}, 1000.0, kSr).n == 0, "a band that is off (or a 0 dB bell) does nothing");
+}
+
+void testV06()
+{
+    std::cout << "v0.6 (release fade, base key, EDO / Seed-EDO, scale lock, mod links, EQ, divisions)" << std::endl;
+    using seed::ids::fx;
+    namespace ids = seed::ids;
+
+    // ---- Release fades to (practically) nothing instead of being cut at -60 dB ----------------------
+    {
+        Rig r;
+        r.set (ids::release, 400.0f); r.set (ids::keyMode, 2.0f);
+        r.settleCalculator();
+        r.render (0.5, Rig::noteOn ({ 60 }));
+        juce::AudioBuffer<float> b (2, 32);
+        float prevPeak = 0.0f, lastActivePeak = 1.0f;
+        int blocks = 0;
+        for (int i = 0; i < 4000; ++i)
+        {
+            b.clear();
+            juce::MidiBuffer m;
+            if (i == 0) m = Rig::noteOff (60);
+            r.proc->processBlock (b, m);
+            float pk = 0.0f;
+            for (int k = 0; k < 32; ++k) pk = std::max (pk, std::abs (b.getSample (0, k)));
+            if (r.proc->uiActiveVoices.load() == 0) { lastActivePeak = prevPeak; blocks = i; break; }
+            prevPeak = pk;
+        }
+        const double secs = blocks * 32.0 / kSr;
+        check (lastActivePeak < 2e-5f, "release: the last audible block before the end is inaudibly quiet (no cut)",
+               "peak " + juce::String (lastActivePeak, 8) + " = " + juce::String (20.0 * std::log10 (std::max (1e-12f, lastActivePeak)), 1) + " dBFS");
+        check (secs > 0.4 && secs < 1.2, "release: the tail lasts about the set time", juce::String (secs, 3) + " s for 400 ms");
+    }
+
+    // ---- Base key: the key that plays the unison ------------------------------------------------------
+    {
+        Rig r;
+        r.set (ids::keyMode, 2.0f); r.set (ids::baseKey, 57.0f);
+        r.settleCalculator();
+        const auto fin = r.proc->finalScale();
+        std::array<double, 140> c {}, st {};
+        fin.playable (c.data(), st.data(), 140);
+        auto x = r.render (0.4, Rig::noteOn ({ 57 }));
+        check (toneAmp (tail (x, 0.2), 261.6255653) > 0.02, "base key A3 (57): key 57 plays the unison (261.63 Hz)");
+        auto y = r.render (0.4, Rig::noteOn ({ 58 }));
+        check (toneAmp (tail (y, 0.2), 261.6255653 * std::exp2 (c[1] / 1200.0)) > 0.02, "base key A3: key 58 plays scale note 1",
+               juce::String (c[1], 1) + " c");
+        Rig d;
+        d.set (ids::keyMode, 2.0f);
+        auto z = d.render (0.4, Rig::noteOn ({ 57 }));
+        check (toneAmp (tail (z, 0.2), 261.6255653) < 0.005, "default base key C4: key 57 is NOT the unison");
+    }
+
+    // ---- EDO / Seed-EDO methods: 1..120 equal steps -----------------------------------------------------
+    {
+        Rig r;
+        r.set (ids::method, 3.0f); r.set (ids::edoSteps, 19.0f);
+        r.settleCalculator();
+        auto fin = r.proc->finalScale();
+        bool exact = fin.count == 20;
+        for (int k = 0; exact && k < fin.count; ++k) exact &= std::abs (fin.notes[(size_t) k].cents - 1200.0 * k / 19.0) < 1e-6;
+        check (exact, "EDO 19: unison + 18 steps + period, every step at k*1200/19", juce::String (fin.count) + " entries");
+        r.set (ids::edoSteps, 120.0f);
+        r.settleCalculator();
+        fin = r.proc->finalScale();
+        check (fin.count == 121 && std::abs (fin.period - 1200.0) < 1e-9 && std::abs (fin.notes[119].cents - 1200.0 * 119 / 120.0) < 1e-6,
+               "EDO 120: 121 entries (120 steps), all editable", juce::String (fin.count) + " entries");
+        r.set (ids::edoSteps, 1.0f);
+        r.settleCalculator();
+        check (r.proc->finalScale().count == 2, "EDO 1: just the unison and the period");
+        r.set (ids::method, 4.0f); r.set (ids::seed, 2.5f); r.set (ids::edoSteps, 12.0f);
+        r.settleCalculator();
+        fin = r.proc->finalScale();
+        check (fin.count == 13 && std::abs (fin.period - 1586.3137) < 1e-3 && std::abs (fin.notes[1].cents - 1586.3137 / 12.0) < 1e-3,
+               "Seed-EDO 12 at seed 2.5: 12 equal steps of the stretched octave", juce::String (fin.notes[1].cents, 3) + " c");
+        r.set (ids::noteOn (3), 0.0f);
+        check (r.proc->finalScale().count == 13, "EDO notes can be switched off like any note (still listed)");
+        // The keyboard plays them: key 61 = step 1 in Scale mode.
+        r.set (ids::keyMode, 2.0f);
+        r.settleCalculator();
+        auto x = r.render (0.4, Rig::noteOn ({ 61 }));
+        check (toneAmp (tail (x, 0.2), 261.6255653 * std::exp2 (1586.3137 / 12.0 / 1200.0)) > 0.02, "Seed-EDO: key 61 plays step 1");
+    }
+
+    // ---- Scale lock ----------------------------------------------------------------------------------------
+    {
+        Rig r;
+        r.set (ids::keyMode, 2.0f);
+        r.settleCalculator();
+        const auto before = r.proc->finalScale();
+        r.proc->setScaleLocked (true);
+        r.set (ids::seed, 2.5f);
+        r.settleCalculator();
+        const auto locked = r.proc->finalScale();
+        bool same = locked.count == before.count && std::abs (locked.period - before.period) < 1e-9;
+        for (int i = 0; same && i < before.count; ++i) same &= std::abs (locked.notes[(size_t) i].cents - before.notes[(size_t) i].cents) < 1e-9;
+        check (same && r.proc->scaleLocked(), "locked: the seed changes but the scale's notes stay", juce::String (locked.count) + " notes, period " + juce::String (locked.period, 2));
+        check (std::abs (r.proc->calculatorOutput().curve.periodCents - 1586.3137) < 1e-3, "locked: the live curve still follows the new seed");
+        // The keyboard keeps playing the locked notes.
+        r.render (0.1, Rig::noteOn ({ 62 }));
+        std::array<double, 140> c {}, st {};
+        before.playable (c.data(), st.data(), 140);
+        check (std::abs (r.proc->uiHeld[0].load() - (float) c[2]) < 0.01f, "locked: key 62 still plays the locked scale's note 2", juce::String (r.proc->uiHeld[0].load(), 2));
+        // Dice never touches the lock.
+        r.proc->randomize (SeedProcessor::Scope::Tuning, 1.0);
+        check (r.proc->scaleLocked(), "Dice tuning leaves the lock alone");
+        // It survives a project save / load.
+        juce::MemoryBlock mb;
+        r.proc->getStateInformation (mb);
+        Rig q;
+        q.proc->setStateInformation (mb.getData(), (int) mb.getSize());
+        const auto restored = q.proc->finalScale();
+        bool same2 = q.proc->scaleLocked() && restored.count == before.count;
+        for (int i = 0; same2 && i < before.count; ++i) same2 &= std::abs (restored.notes[(size_t) i].cents - before.notes[(size_t) i].cents) < 1e-3;
+        check (same2, "the lock and its notes are restored with the project");
+        // Unlocking recalculates.
+        r.proc->setScaleLocked (false);
+        r.set (ids::method, 0.0f); r.set (ids::seed, 2.5f);
+        r.settleCalculator();
+        check (! r.proc->scaleLocked() && std::abs (r.proc->finalScale().period - 1586.3137) < 1e-3, "unlocked: the scale follows the seed again");
+    }
+
+    // ---- Modulation links: one modulator, many fields; amounts; persistence --------------------------------------
+    {
+        Rig m;
+        check (m.proc->addModLink (1, ids::seed) && m.proc->addModLink (1, fx (1, "mix"), 50.0f) && m.proc->addModLink (2, ids::seed),
+               "one modulator can be linked to many fields, many modulators to one field");
+        check (! m.proc->addModLink (1, ids::seed) && ! m.proc->addModLink (1, ids::keyMode) && ! m.proc->addModLink (9, ids::seed),
+               "duplicate / non-float / out-of-range links are refused");
+        check (m.proc->modMaskFor (ids::seed) == 3u && m.proc->modMaskFor (fx (1, "mix")) == 1u, "link masks name the modulators");
+        m.set (ids::modShape (1), 3.0f); m.set (ids::modRate (1), 0.25f); m.set (ids::modDepth (1), 100.0f);
+        m.render (0.1);
+        const float offSeed = m.proc->modOffsetNorm (m.proc->param (ids::seed)), offMix = m.proc->modOffsetNorm (m.proc->param (fx (1, "mix")));
+        check (std::abs (offSeed - 0.5f) < 1e-3f && std::abs (offMix - 0.25f) < 1e-3f, "square at 100 % depth: +0.5 on the seed, +0.25 through a 50 % link",
+               juce::String (offSeed, 3) + " / " + juce::String (offMix, 3));
+        m.proc->setModLinkAmount (1, ids::seed, -100.0f);
+        m.render (0.1);
+        check (m.proc->modOffsetNorm (m.proc->param (ids::seed)) < -0.49f, "a negative link amount inverts");
+        juce::MemoryBlock mb;
+        m.proc->getStateInformation (mb);
+        Rig q;
+        q.proc->setStateInformation (mb.getData(), (int) mb.getSize());
+        check (q.proc->modLinks().size() == 3 && q.proc->modMaskFor (ids::seed) == 3u, "links are saved with the project");
+        m.proc->removeModLink (1, ids::seed);
+        check (m.proc->modMaskFor (ids::seed) == 2u, "a link can be removed");
+        Rig n;
+        n.proc->addModLink (1, ids::modRate (2));
+        check (n.proc->modMaskFor (ids::modRate (2)) == 1u, "modulators can modulate modulators");
+    }
+    // Old projects: a v0.5 single mod target becomes a link; the Scale method keeps its meaning.
+    {
+        Rig src;
+        const auto mb = oldStyleState (*src.proc, { { "mod1target", 14.0 }, { "method", 1.0 } }); // 14 = "Cutoff" in the v0.5 list
+        Rig q;
+        q.proc->setStateInformation (mb.getData(), (int) mb.getSize());
+        auto* t1 = q.proc->apvts.getParameter (ids::modTarget (1));
+        auto* mp = q.proc->apvts.getParameter (ids::method);
+        check (q.proc->modLinks().size() == 1 && q.proc->modLinks()[0].paramId == ids::cutoff && q.proc->modLinks()[0].mod == 1 && t1->getValue() < 1e-6f,
+               "old project: the single mod target became a link");
+        check (std::lround (mp->convertFrom0to1 (mp->getValue())) == 1, "old project: Scale method 'Consonance' is still Consonance");
+        const auto mb2 = oldStyleState (*src.proc, { { "method", 2.0 } });
+        q.proc->setStateInformation (mb2.getData(), (int) mb2.getSize());
+        check (std::lround (mp->convertFrom0to1 (mp->getValue())) == 2, "old project: Scale method 'Imported' is still Imported");
+    }
+    // Links follow the Tuning / Sound split of presets.
+    {
+        Rig a;
+        a.proc->addModLink (1, ids::seed); a.proc->addModLink (1, fx (1, "mix"));
+        const juce::String name = "__seedtest_links_" + juce::String (juce::Random::getSystemRandom().nextInt (100000));
+        a.proc->savePreset (name);
+        const auto file = SeedProcessor::presetFolder().getChildFile (name + ".seedpreset");
+        Rig s;
+        s.proc->loadPreset (file, SeedProcessor::Scope::Sound);
+        Rig t;
+        t.proc->loadPreset (file, SeedProcessor::Scope::Tuning);
+        check (s.proc->modMaskFor (fx (1, "mix")) == 1u && s.proc->modMaskFor (ids::seed) == 0u && t.proc->modMaskFor (ids::seed) == 1u && t.proc->modMaskFor (fx (1, "mix")) == 0u,
+               "preset scope: links to the seed load with Tuning, other links with Sound");
+        file.deleteFile();
+    }
+
+    // ---- Tempo divisions: straight / triplet / dotted ------------------------------------------------------------------
+    {
+        const auto& n = seed::beatNames();
+        check (n.size() == seed::kBeatChoices && n[15] == "4/16" && n[16] == "4/16t" && n[17] == "4/16.", "divisions: 4/16, 4/16t, 4/16.");
+        check (std::abs (seed::beatLength (15) - 1.0) < 1e-12 && std::abs (seed::beatLength (16) - 2.0 / 3.0) < 1e-12 && std::abs (seed::beatLength (17) - 1.5) < 1e-12,
+               "4/16 = 1 beat, triplet = 2/3, dotted = 3/2");
+        Rig m;
+        m.set (ids::modShape (1), 3.0f); m.set (ids::modSync (1), 1.0f); m.set (ids::modBeat (1), 15.0f); m.set (ids::modDepth (1), 100.0f);
+        m.render (0.1);
+        const float v1 = m.proc->uiModValue[0].load();
+        m.render (0.25);
+        check (v1 > 0.5f && m.proc->uiModValue[0].load() < -0.5f, "modulator synced to 4/16 at 120 BPM flips every 250 ms (a 500 ms square)");
+    }
+
+    // ---- Dragging a modulator chip onto a number box (the UI wiring) ---------------------------------------------------------
+    {
+        Rig r;
+        std::unique_ptr<juce::AudioProcessorEditor> ed (r.proc->createEditor());
+        std::function<pvst::ScrubBox* (juce::Component&, const juce::String&)> find = [&find] (juce::Component& c, const juce::String& tip) -> pvst::ScrubBox* {
+            if (auto* sb = dynamic_cast<pvst::ScrubBox*> (&c)) if (sb->getTooltip() == tip) return sb;
+            for (auto* child : c.getChildren()) if (auto* f = find (*child, tip)) return f;
+            return nullptr;
+        };
+        auto* seedBox = find (*ed, seed::helpFor (ids::seed));
+        auto* partialsBox = find (*ed, seed::helpFor (ids::partials));
+        bool ok = seedBox != nullptr && partialsBox != nullptr;
+        if (ok)
+        {
+            const juce::DragAndDropTarget::SourceDetails d (juce::var ("mod:3"), nullptr, {});
+            ok = seedBox->isInterestedInDragSource (d) && ! partialsBox->isInterestedInDragSource (d); // integers can't be modulated
+            seedBox->itemDropped (d);
+        }
+        check (ok && r.proc->modMaskFor (ids::seed) == 4u, "dropping modulator 3 on the Seed box links it (integer boxes refuse)");
+    }
+
+    // ---- Short notes still report themselves to the UI ------------------------------------------------------------------------
+    {
+        Rig r;
+        r.set (ids::keyMode, 2.0f);
+        r.settleCalculator();
+        const uint32_t before = r.proc->uiHitSeq.load();
+        juce::MidiBuffer m; // note on + off inside ONE block: the held-note list never sees it
+        m.addEvent (juce::MidiMessage::noteOn (1, 62, 0.8f), 0);
+        m.addEvent (juce::MidiMessage::noteOff (1, 62), 100);
+        r.render (0.01, m);
+        std::array<double, 140> c {}, st {};
+        r.proc->finalScale().playable (c.data(), st.data(), 140);
+        const float hit = r.proc->uiHitCents[before % (uint32_t) SeedProcessor::kHitRing].load();
+        check (r.proc->uiHitSeq.load() == before + 1 && std::abs (hit - (float) c[2]) < 0.01f, "a note shorter than a block is latched for the UI", juce::String (hit, 2));
+    }
+
+    // ---- 12 FX slots ----------------------------------------------------------------------------------------------------------------
+    {
+        Rig r;
+        r.set (ids::release, 0.0f); r.set (ids::attack, 0.0f);
+        r.set (fx (12, "type"), (float) seed::FxDelay); r.set (fx (12, "in"), 1.0f); r.set (fx (12, "picks"), 0.0f);
+        r.set (fx (12, "mix"), 100.0f); r.set (fx (12, "dFb"), 0.0f); r.set (fx (12, "dTime"), 200.0f); r.set (fx (12, "dPing"), 0.0f);
+        r.render (0.4);
+        r.render (0.05, Rig::noteOn ({ 69 }));
+        r.render (0.001, Rig::noteOff (69));
+        auto x = r.render (0.4);
+        const std::vector<float> w (x.begin() + (long) (0.17 * kSr), x.begin() + (long) (0.22 * kSr));
+        check (toneAmp (w, 440.0) > 0.01, "slot 12 (partial delay) works: the echo arrives", juce::String (toneAmp (w, 440.0), 4));
+        r.proc->swapFxSlots (12, 11);
+        auto* tp = r.proc->apvts.getParameter (fx (11, "type"));
+        check ((int) std::lround (tp->convertFrom0to1 (tp->getValue())) == seed::FxDelay, "swapping slots 12 and 11 works");
+    }
+
+    // ---- EQ in the signal path ----------------------------------------------------------------------------------------------------------
+    {
+        using seed::ids::eq;
+        auto ratio = [&] (int key, bool eqOn, float kt) {
+            Rig r;
+            r.set (ids::sustain, 100.0f);
+            if (eqOn)
+            {
+                r.set (eq (1, "on"), 1.0f); r.set (eq (1, "type"), (float) pvst::eq::Bell); r.set (eq (1, "freq"), 523.2511f);
+                r.set (eq (1, "gain"), 12.0f); r.set (eq (1, "q"), 2.0f); r.set (eq (1, "kt"), kt);
+            }
+            r.render (0.3, Rig::noteOn ({ key }, 0.8f));
+            auto x = tail (r.render (0.4), 0.3);
+            const double f0 = 261.6255653 * std::exp2 ((key - 60) / 12.0);
+            return toneAmp (x, 2.0 * f0) / toneAmp (x, f0); // partial 2 against partial 1 (0.5 without EQ)
+        };
+        const double plain = ratio (60, false, 0.0f), boosted = ratio (60, true, 0.0f);
+        check (plain > 0.45 && plain < 0.55 && boosted / plain > 3.0 && boosted / plain < 4.6, "EQ bell +12 dB at 523 Hz lifts partial 2 of C4 about 4x",
+               juce::String (plain, 3) + " -> " + juce::String (boosted, 3));
+        const double fixedBand = ratio (72, true, 0.0f), tracked = ratio (72, true, 100.0f);
+        check (fixedBand / 0.5 < 0.4 && tracked / 0.5 > 3.0, "key track: an octave up, a fixed band boosts partial 1, a 100% tracked band follows to partial 2",
+               juce::String (fixedBand, 3) + " vs " + juce::String (tracked, 3));
+    }
+}
+
 void snapshot (const juce::File& file)
 {
     SeedProcessor proc;
@@ -810,6 +1136,15 @@ void snapshot (const juce::File& file)
     setp (seed::ids::customNoteCents (1), 1450.0f); setp (seed::ids::customNoteOn (1), 1.0f);
     setp (seed::ids::partialLevel (3), -12.0f);
     setp (seed::ids::customPartialCents (1), 2100.0f); setp (seed::ids::customPartialOn (1), 1.0f);
+    // v0.6 things to look at: modulator links, a few EQ bands, optionally another method (SEED_METHOD / SEED_STEPS) and the lock.
+    proc.addModLink (1, seed::ids::seed, 100.0f); proc.addModLink (1, seed::ids::eq (2, "freq"), -40.0f); proc.addModLink (3, seed::ids::fx (1, "mix"), 60.0f);
+    setp (seed::ids::modDepth (1), 10.0f); setp (seed::ids::modShape (3), 0.0f);
+    setp (seed::ids::eq (1, "on"), 1.0f); setp (seed::ids::eq (1, "gain"), 6.0f);
+    setp (seed::ids::eq (2, "on"), 1.0f); setp (seed::ids::eq (2, "gain"), -9.0f); setp (seed::ids::eq (2, "kt"), 50.0f);
+    setp (seed::ids::eq (4, "on"), 1.0f); setp (seed::ids::eq (4, "type"), (float) pvst::eq::HighCut); setp (seed::ids::eq (4, "freq"), 6000.0f); setp (seed::ids::eq (4, "steep"), 2.0f);
+    if (auto* mth = std::getenv ("SEED_METHOD")) setp (seed::ids::method, (float) juce::String (mth).getIntValue());
+    if (auto* st = std::getenv ("SEED_STEPS")) setp (seed::ids::edoSteps, (float) juce::String (st).getIntValue());
+    if (std::getenv ("SEED_LOCK")) { proc.pumpCalculator(); juce::Thread::sleep (200); proc.pumpCalculator(); proc.setScaleLocked (true); setp (seed::ids::seed, 2.3f); }
     if (auto* tab = std::getenv ("SEED_TAB")) juce::ignoreUnused (tab);
     // Hold a note (Scale mode, key 64 = scale note 4) so the played-note highlight shows.
     setp (seed::ids::keyMode, 2.0f);
@@ -843,13 +1178,13 @@ void bench()
 {
     struct Case { const char* name; int voices; int partials; bool heavy; };
     for (auto c : { Case { "1 voice, 16 partials, plain", 1, 16, false }, Case { "8 voices, 16 partials, plain", 8, 16, false },
-                    Case { "8 voices, 64 partials, filter+sends+FX", 8, 64, true }, Case { "16 voices, 64 partials, filter+sends+FX", 16, 64, true } })
+                    Case { "8 voices, 64 partials, EQ+sends+FX", 8, 64, true }, Case { "16 voices, 64 partials, EQ+sends+FX", 16, 64, true } })
     {
         Rig r;
         r.set (seed::ids::partials, (float) c.partials);
         if (c.heavy)
         {
-            r.set (seed::ids::filterMode, 1.0f); r.set (seed::ids::fx (1, "mix"), 50.0f); r.set (seed::ids::fx (2, "mix"), 50.0f);
+            r.set (seed::ids::eq (1, "on"), 1.0f); r.set (seed::ids::eq (1, "gain"), 6.0f); r.set (seed::ids::eq (3, "on"), 1.0f); r.set (seed::ids::eq (3, "gain"), -6.0f); r.set (seed::ids::eq (3, "kt"), 100.0f); r.set (seed::ids::fx (1, "mix"), 50.0f); r.set (seed::ids::fx (2, "mix"), 50.0f);
             r.set (seed::ids::fx (3, "mix"), 50.0f); r.set (seed::ids::spread, 80.0f); r.set (seed::ids::shimmer, 50.0f);
             r.set (seed::ids::fx (1, "dSpiral"), 300.0f);
         }
@@ -905,6 +1240,8 @@ int main (int argc, char** argv)
     testV04();
     testV05();
     testScala();
+    testEqMaths();
+    testV06();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")
             snapshot (juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]));

@@ -3,8 +3,8 @@
 //   CALCULATOR: the tuning params + a background worker (xen::CalculatorWorker) that turns them
 //               into a scale. Runs from a message-thread timer (pumpCalculator), never on the
 //               audio thread. The raw scale reaches the audio thread through a try-lock handoff.
-//   SYNTH:      SeedEngine (voices), FX (Partial Delay, Rough Reverb), modulators, safety stage.
-// Also: presets (All / Tuning / Sound), Dice / Mutate, and state save/load.
+//   SYNTH:      SeedEngine (voices, 5-band EQ), FX rack, modulators, safety stage.
+// Also: presets (All / Tuning / Sound), Dice / Mutate, scale lock, modulation links, state save/load.
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <unordered_map>
 
@@ -76,6 +76,34 @@ public:
     juce::String importedScaleName() const { return importedName; }
     int importedScaleSize() const { return (int) importedCents.size(); }
 
+    // ---- Scale lock (message thread) ------------------------------------------------------------
+    /// Locked = the keyboard keeps playing the scale that was current when the lock was set, however the
+    /// seed / partials / method change afterwards (note edits still apply on top). The live curve keeps
+    /// updating, so you can see the locked notes against the new timbre.
+    bool scaleLocked() const { return P (seed::ids::scaleLock)->getValue() > 0.5f; }
+    /// Locks (snapshotting the scale right now) or unlocks (the scale is recalculated from the current
+    /// settings: the notes WILL change, the UI asks first).
+    void setScaleLocked (bool lock);
+
+    // ---- Modulation links (message thread, except modOffsetNorm) ------------------------------------
+    // A modulator is linked to any number of float parameters (drag a modulator onto a field). Each link
+    // has its own amount (-100..+100 %, multiplies the modulator's depth). Stored in the plugin state
+    // (ValueTree "MODLINKS"), mirrored into a lock-free table for the audio thread.
+    struct ModLink { int mod = 0; juce::String paramId; float amount = 100.0f; };
+    static constexpr int kMaxLinks = 256;
+    std::vector<ModLink> modLinks() const;
+    /// Links `mod` (1..kNumMods) to the parameter. False if not a float parameter, already linked or table full.
+    bool addModLink (int mod, const juce::String& paramId, float amountPercent = 100.0f);
+    void removeModLink (int mod, const juce::String& paramId);
+    void setModLinkAmount (int mod, const juce::String& paramId, float amountPercent);
+    void clearModLinks();
+    /// Changes whenever the links change (so the UI knows when to rebuild its link chips).
+    uint32_t linksVersion() const { return linksEpoch.load(); }
+    /// Bit m-1 set = modulator m drives this parameter.
+    unsigned modMaskFor (const juce::String& paramId) const;
+    /// Live modulation of a parameter in normalised units (audio thread's last block), for the UI.
+    float modOffsetNorm (const juce::RangedAudioParameter& p) const;
+
     // ---- Presets (message thread) -----------------------------------------------------------
     enum class Scope { All = 0, Tuning = 1, Sound = 2 };
     static juce::File presetFolder();
@@ -106,14 +134,21 @@ public:
     std::array<std::atomic<float>, seed::kNumMods> uiModValue {};
     /// Held notes (cents above the Fundamental), NaN = empty slot. Written by the audio thread.
     std::array<std::atomic<float>, seed::kMaxVoices> uiHeld {};
+    /// Every note-on since the window opened, newest last in a ring (cents above the Fundamental).
+    /// Lets the UI light up notes that were shorter than one refresh. Sequence counter = total so far.
+    static constexpr int kHitRing = 64;
+    std::array<std::atomic<float>, kHitRing> uiHitCents {};
+    std::atomic<uint32_t> uiHitSeq { 0 };
     int safetyFaults() const { return safety.faultCount(); }
 
 private:
     void timerCallback() override { pumpCalculator(); }
-    double eff (juce::RangedAudioParameter* p, int modTarget) const;
+    /// Plain value of a parameter with the modulators' offsets applied (audio thread).
+    double eff (juce::RangedAudioParameter* p) const;
     void buildEngineParams (double blockSeconds);
     void updateScaleOnAudioThread();
     void handleMidi (const juce::MidiMessage& m);
+    void publishHits();
     void updateDrone();
 
     // Engine + FX + safety.
@@ -133,11 +168,28 @@ private:
     std::vector<float> wetL, wetR;
     double bpm = 120.0;
     void processRack (int n);
-    double fxValue (int slot, const char* name) const;   // plain value, modulation applied
-    std::unordered_map<const juce::RangedAudioParameter*, int> targetOf; // param -> mod target index
+    struct FxParams { juce::RangedAudioParameter *type, *on, *in, *picks, *mix, *pan, *width, *dTime, *dSync, *dBeat, *dFb,
+                      *dSpiral, *dPing, *dTone, *rDecay, *rRough, *rDamp, *cDecay, *cChirp, *cSize, *cDamp, *kThr, *kSlope,
+                      *kAtt, *kRel, *kMake; };
+    std::array<FxParams, seed::kNumFx> fxp {};
+    struct EqParams { juce::RangedAudioParameter *on, *type, *freq, *gain, *q, *steep, *kt; };
+    std::array<EqParams, seed::kEqBands> eqp {};
+    juce::RangedAudioParameter *pSeed = nullptr, *pFund = nullptr, *pRolloff = nullptr, *pMinDip = nullptr, *pTol = nullptr;
     pvst::SafetyStage safety;
     std::array<pvst::Modulator, seed::kNumMods> mods;
-    std::vector<double> modOffset;                 // per target index, normalised units
+    // Modulation: the link table (audio thread reads, message thread writes), per-parameter offsets.
+    struct LinkSlot { std::atomic<int> param { -1 }, mod { 0 }; std::atomic<float> amount { 0.0f }; };
+    std::array<LinkSlot, kMaxLinks> linkSlots;
+    std::vector<double> modOffset;                 // per parameter index, normalised units (audio thread)
+    std::unique_ptr<std::atomic<float>[]> uiModOffset; // same, for the UI (only linked parameters are kept fresh)
+    std::array<double, seed::kNumMods> lastModValue {};
+    std::atomic<uint32_t> linksEpoch { 1 };
+    std::vector<ModLink> links;                    // the truth (message thread); mirrored into linkSlots + state
+    void commitLinks();                            // linkSlots + the "modLinks" state property
+    void loadLinksFromText (const juce::String& text);
+    static juce::String linksToText (const std::vector<ModLink>& l);
+    void absorbLegacyTargets();                    // v0.5 single mod targets -> links
+    void computeModOffsets (double blockSeconds);
     std::vector<float> dryL, dryR;
     int droneSounding = -1;
     double bendNorm = 0.0;                          // pitch wheel, -1..1
@@ -157,7 +209,7 @@ private:
     xen::RawScale sharedRaw, audioRaw;
     uint64_t sharedVersion = 0, audioVersion = 0;
     // Effective (modulated) calculator inputs, published by the audio thread for pumpCalculator.
-    std::atomic<float> effSeed { -1.0f }, effFund { -1.0f }, effRolloff { -1.0f }, effMinDip { -1.0f };
+    std::atomic<float> effSeed { -1.0f }, effFund { -1.0f }, effRolloff { -1.0f }, effMinDip { -1.0f }, effTol { -1.0f };
 
     // Cached parameter pointers.
     juce::RangedAudioParameter* P (const char* id) const { return apvts.getParameter (id); }
@@ -168,8 +220,15 @@ private:
     std::array<juce::RangedAudioParameter*, xen::kSeriesPartials> pScl {};
     std::array<juce::RangedAudioParameter*, xen::kCustomPartials> cpScl {};
     void randomizeOne (juce::RangedAudioParameter& p, double amount, juce::Random& r);
-    std::array<juce::RangedAudioParameter*, seed::kNumMods> mShape {}, mRate {}, mDepth {}, mTarget {};
-    std::vector<juce::RangedAudioParameter*> targetParams; // index = mod target
+    std::array<juce::RangedAudioParameter*, seed::kNumMods> mShape {}, mRate {}, mDepth {}, mSync {}, mBeat {};
+    std::array<juce::RangedAudioParameter*, seed::kLegacyMods> mTarget {};
+    std::vector<juce::RangedAudioParameter*> targetParams; // legacy target index -> parameter (migration only)
+    // The scale lock's snapshot (message thread). Text copy lives in apvts.state ("lockedScale").
+    xen::RawScale lockedRaw;
+    bool publishedLocked = false;
+    void setLockedFromText (const juce::String& text);
+    void publishScale();
+    xen::RawScale rawScaleNow() const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SeedProcessor)
 };

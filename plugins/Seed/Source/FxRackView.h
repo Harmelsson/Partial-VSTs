@@ -1,8 +1,8 @@
 #pragma once
-// FX tab (v0.5): the FX RACK.
-//   left  : the 5 slots top to bottom (= processing order). Click a slot to edit it, the small
+// FX tab (v0.5): the FX RACK. v0.6: 12 slots, the list scrolls (mouse wheel), the settings pane scrolls.
+//   left  : the slots top to bottom (= processing order). Click a slot to edit it, the small
 //           square switches it on/off, the arrows swap it with its neighbour.
-//   right : the selected slot's settings: type, on, input (Chain = the sound so far / Partials =
+//   middle: the selected slot's settings: type, on, input (Chain = the sound so far / Partials =
 //           only the partials it picks), Picks (a continuous morph: scroll between Odd and Even for
 //           a 50/50 mix), mix, pan, width, then the settings of its effect type.
 // Every setting is a host parameter (automatable); swapping slots swaps their parameter values.
@@ -12,7 +12,7 @@
 /// Picks as a scrollable morph between pick rules (user v0.4: "scrolling in between Odd and Even
 /// would sound really cool"). Drag up/down (40 px per rule, Shift = slower), wheel = 0.1 steps,
 /// middle-click = default. Shows e.g. "Odd 50% / Even 50%".
-class PicksBox : public juce::Component
+class PicksBox : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     PicksBox (juce::RangedAudioParameter& p, juce::String l)
@@ -73,13 +73,22 @@ private:
 class FxRackView : public juce::Component
 {
 public:
-    explicit FxRackView (SeedProcessor& p) : proc (p) { rebuildDetail(); }
+    explicit FxRackView (SeedProcessor& p) : proc (p)
+    {
+        viewport.setViewedComponent (&holder, false);
+        viewport.setScrollBarsShown (true, false);
+        viewport.setScrollBarThickness (8);
+        viewport.getVerticalScrollBar().setColour (juce::ScrollBar::thumbColourId, pvst::theme::mix (0.3f));
+        viewport.getVerticalScrollBar().setColour (juce::ScrollBar::trackColourId, pvst::theme::mix (0.06f));
+        addAndMakeVisible (viewport);
+        rebuildDetail();
+    }
 
     /// IDs of the selected slot's parameters (for the page's Dice / Mutate / Reset buttons).
     juce::StringArray pageIds() const
     {
         juce::StringArray a;
-        for (auto* n : { "type", "on", "in", "picks", "mix", "pan", "width", "dTime", "dSync", "dDiv", "dFb", "dSpiral", "dPing",
+        for (auto* n : { "type", "on", "in", "picks", "mix", "pan", "width", "dTime", "dSync", "dBeat", "dFb", "dSpiral", "dPing",
                          "dTone", "rDecay", "rRough", "rDamp", "cDecay", "cChirp", "cSize", "cDamp", "kThr", "kSlope", "kAtt", "kRel", "kMake" })
             a.add (seed::ids::fx (selected, n));
         return a;
@@ -97,14 +106,20 @@ public:
         namespace th = pvst::theme;
         auto list = listArea();
         g.setColour (th::dim()); g.setFont (th::sans (12.0f));
-        g.drawText ("RACK  (top to bottom)", list.removeFromTop (16), juce::Justification::bottomLeft);
+        g.drawText ("RACK  (top to bottom, scroll for more)", list.removeFromTop (16), juce::Justification::bottomLeft);
         list.removeFromTop (3);
         rows.clear();
-        for (int sl = 1; sl <= seed::kNumFx; ++sl)
+        listViewport = list;
+        maxScroll = juce::jmax (0, seed::kNumFx * kRowH - list.getHeight());
+        scroll = juce::jlimit (0, maxScroll, scroll);
+        g.saveState();
+        g.reduceClipRegion (list);
+        int y = list.getY() - scroll;
+        for (int sl = 1; sl <= seed::kNumFx; ++sl, y += kRowH)
         {
-            auto row = list.removeFromTop (kRowH - 2);
-            list.removeFromTop (2);
+            auto row = juce::Rectangle<int> (list.getX(), y, list.getWidth() - 10, kRowH - 2);
             rows.push_back (row);
+            if (row.getBottom() < list.getY() || row.getY() > list.getBottom()) continue;
             const int type = typeOf (sl);
             const bool on = param (sl, "on").getValue() > 0.5f;
             const bool sel = sl == selected;
@@ -121,7 +136,7 @@ public:
             g.setColour (th::mix (sl < seed::kNumFx ? 0.6f : 0.2f)); g.fillPath (pd);
             r.removeFromLeft (6);
             g.setColour (th::dim()); g.setFont (th::mono (12.0f));
-            g.drawText (juce::String (sl), r.removeFromLeft (14), juce::Justification::centredLeft);
+            g.drawText (juce::String (sl), r.removeFromLeft (16), juce::Justification::centredLeft);
             // On square.
             auto box = r.removeFromLeft (16).withSizeKeepingCentre (10, 10).toFloat();
             g.setColour (on ? th::mix (0.85f) : th::mix (0.3f));
@@ -129,20 +144,38 @@ public:
             g.drawRect (box, 1.0f);
             r.removeFromLeft (6);
             g.setColour (type == seed::FxOff || ! on ? th::dim() : th::text()); g.setFont (th::sans (13.0f));
-            g.drawText (seed::fxTypeNames()[type], r.removeFromLeft (110), juce::Justification::centredLeft);
+            g.drawText (seed::fxTypeNames()[type], r.removeFromTop (r.getHeight() / 2 + 2), juce::Justification::bottomLeft);
             if (type != seed::FxOff)
             {
                 const bool partials = param (sl, "in").getValue() > 0.5f;
-                g.setColour (th::dim()); g.setFont (th::sans (11.5f));
-                g.drawText ((partials ? "partials: " + param (sl, "picks").getCurrentValueAsText() : juce::String ("chain"))
-                                + "   mix " + param (sl, "mix").getCurrentValueAsText(),
-                            r, juce::Justification::centredLeft);
+                g.setColour (th::dim()); g.setFont (th::sans (10.5f));
+                g.drawFittedText ((partials ? "partials: " + param (sl, "picks").getCurrentValueAsText() : juce::String ("chain"))
+                                      + "  mix " + param (sl, "mix").getCurrentValueAsText(),
+                                  r, juce::Justification::topLeft, 1, 0.8f);
             }
         }
+        g.restoreState();
+        // Scrollbar.
+        if (maxScroll > 0)
+        {
+            const float frac = (float) list.getHeight() / (float) (seed::kNumFx * kRowH);
+            const float h = juce::jmax (20.0f, frac * (float) list.getHeight());
+            const float top = (float) list.getY() + (float) scroll / (float) maxScroll * ((float) list.getHeight() - h);
+            g.setColour (th::mix (0.3f));
+            g.fillRect (juce::Rectangle<float> ((float) list.getRight() - 6.0f, top, 5.0f, h));
+        }
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        if (! listArea().contains (e.getPosition())) return;
+        scroll = juce::jlimit (0, maxScroll, scroll - juce::roundToInt (w.deltaY * 120.0f) * (w.isReversed ? -1 : 1));
+        repaint (listArea());
     }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (! listViewport.contains (e.getPosition())) return;
         for (int i = 0; i < (int) rows.size(); ++i)
         {
             const auto& row = rows[(size_t) i];
@@ -155,7 +188,7 @@ public:
                 const int other = upHalf ? sl - 1 : sl + 1;
                 if (other >= 1 && other <= seed::kNumFx) { proc.swapFxSlots (sl, other); selected = other; rebuildDetail(); }
             }
-            else if (x >= 40 && x < 58)
+            else if (x >= 40 && x < 62)
             {
                 auto& p = param (sl, "on");
                 p.setValueNotifyingHost (p.getValue() > 0.5f ? 0.0f : 1.0f);
@@ -166,11 +199,15 @@ public:
         }
     }
 
-    void resized() override { layoutDetail(); }
+    void resized() override
+    {
+        viewport.setBounds (getLocalBounds().withTrimmedLeft (kListW + 10));
+        layoutDetail();
+    }
 
 private:
-    static constexpr int kRowH = 38;
-    juce::Rectangle<int> listArea() const { return getLocalBounds().removeFromLeft (360).reduced (4, 4); }
+    static constexpr int kRowH = 40, kListW = 226;
+    juce::Rectangle<int> listArea() const { return getLocalBounds().removeFromLeft (kListW).reduced (2, 2); }
     juce::RangedAudioParameter& param (int sl, const char* n) const { return proc.param (seed::ids::fx (sl, n)); }
     int typeOf (int sl) const { auto& p = param (sl, "type"); return juce::jlimit (0, seed::fxTypeNames().size() - 1, (int) std::lround (p.convertFrom0to1 (p.getValue()))); }
 
@@ -179,83 +216,102 @@ private:
         detail.clear();
         shownType = typeOf (selected);
         const int sl = selected;
-        auto box = [&] (const char* n, const juce::String& l, int intD, int dec, double step, int w = 104) {
+        auto push = [&] (std::unique_ptr<juce::Component> c, int w) { items.push_back ({ c.get(), w }); detail.push_back (std::move (c)); };
+        auto box = [&] (const char* n, const juce::String& l, int intD, int dec, double step, int w, const juce::String& help) {
             auto c = std::make_unique<pvst::ScrubBox> (param (sl, n), l, intD, dec, step);
-            items.push_back ({ c.get(), w }); detail.push_back (std::move (c));
+            c->setTooltip (help);
+            push (std::move (c), w);
         };
-        auto seg = [&] (const char* n, const juce::String& l, juce::StringArray o, int w) {
+        auto seg = [&] (const char* n, const juce::String& l, juce::StringArray o, int w, const juce::String& help) {
             auto c = std::make_unique<pvst::SegmentedChoice> (param (sl, n), l, o);
-            items.push_back ({ c.get(), w }); detail.push_back (std::move (c));
+            c->setTooltip (help);
+            push (std::move (c), w);
         };
-        auto choice = [&] (const char* n, const juce::String& l, juce::StringArray o, int w) {
+        auto choice = [&] (const char* n, const juce::String& l, juce::StringArray o, int w, const juce::String& help) {
             auto c = std::make_unique<pvst::ChoiceBox> (param (sl, n), l, o);
-            items.push_back ({ c.get(), w }); detail.push_back (std::move (c));
+            c->setTooltip (help);
+            push (std::move (c), w);
         };
         auto br = [&] { items.push_back ({ nullptr, 0 }); };
         items.clear();
-        choice ("type", "Slot " + juce::String (sl) + " type", seed::fxTypeNames(), 140);
-        seg ("on", "On", { "Off", "On" }, 96);
-        seg ("in", "Input", seed::fxInputNames(), 150);
+        choice ("type", "Slot " + juce::String (sl) + " type", seed::fxTypeNames(), 150, "Which effect lives in this slot.");
+        seg ("on", "On", { "Off", "On" }, 96, "Bypass this slot.");
+        br();
+        seg ("in", "Input", seed::fxInputNames(), 150, "Chain = the sound so far (classic effect). Partials = only the partials you pick below, straight from the synth.");
         {
             auto c = std::make_unique<PicksBox> (param (sl, "picks"), "Picks (scroll to morph)");
-            items.push_back ({ c.get(), 210 }); detail.push_back (std::move (c));
+            c->setTooltip ("Which partials this slot hears when Input = Partials. Scroll between two rules for a blend (Odd 50% / Even 50%).");
+            push (std::move (c), 190);
         }
-        box ("mix", "Mix (%)", 3, 1, 5.0, 96);
-        box ("pan", "Pan (%)", 3, 1, 5.0, 104);
-        box ("width", "Width (%)", 3, 0, 10.0, 96);
+        br();
+        box ("mix", "Mix (%)", 3, 1, 5.0, 96, "Wet amount.");
+        box ("pan", "Pan (%)", 3, 1, 5.0, 100, "Pan of the wet signal.");
+        box ("width", "Width (%)", 3, 0, 10.0, 96, "Stereo width of the wet signal (0 = mono, 200 = extra wide).");
         br();
         switch (shownType)
         {
             case seed::FxDelay:
-                seg ("dSync", "Time", { "ms", "BPM" }, 96);
-                box ("dTime", "Time (ms)", 4, 2, 10.0, 124);
-                choice ("dDiv", "Division", seed::syncDivNames(), 96);
-                box ("dFb", "Feedback (%)", 2, 1, 5.0, 104);
-                box ("dSpiral", "Spiral (c)", 4, 2, 50.0, 124);
-                box ("dPing", "Ping-pong (%)", 3, 0, 10.0, 104);
-                box ("dTone", "Tone (%)", 3, 0, 10.0, 90);
+            {
+                auto c = std::make_unique<pvst::RateControl> (param (sl, "dSync"), param (sl, "dTime"), param (sl, "dBeat"), "Time", 4, 2, 10.0, "ms");
+                c->setHelp ("Delay time in ms, or tempo-synced with the BPM switch (scroll the division; '-' straight, 't' triplet, '.' dotted).");
+                push (std::move (c), 210);
+                box ("dTone", "Tone (%)", 3, 0, 10.0, 90, "Darkens repeated echoes.");
+                br();
+                box ("dFb", "Feedback (%)", 2, 1, 5.0, 104, "How much of each echo feeds the next one.");
+                box ("dSpiral", "Spiral (c)", 4, 2, 50.0, 124, "Each repeat is transposed by this many cents: a spiral up or down.");
+                box ("dPing", "Ping-pong (%)", 3, 0, 10.0, 104, "How far the echoes bounce between left and right.");
                 break;
+            }
             case seed::FxRough:
-                box ("rDecay", "Decay (s)", 2, 2, 0.5, 100);
-                box ("rRough", "Roughness (%)", 3, 1, 5.0, 110);
-                box ("rDamp", "Damping (%)", 3, 0, 10.0, 100);
+                box ("rDecay", "Decay (s)", 2, 2, 0.5, 100, "Reverb length.");
+                box ("rRough", "Roughness (%)", 3, 1, 5.0, 110, "How far the detuned twin resonators beat against each other (100 % = maximally uncomfortable).");
+                box ("rDamp", "Damping (%)", 3, 0, 10.0, 100, "Darkens the tail.");
                 break;
             case seed::FxChirp:
-                box ("cDecay", "Decay (s)", 2, 2, 0.5, 100);
-                box ("cChirp", "Chirp (%)", 3, 0, 5.0, 100);
-                box ("cSize", "Size (ms)", 3, 1, 5.0, 104);
-                box ("cDamp", "Damping (%)", 3, 0, 10.0, 100);
+                box ("cDecay", "Decay (s)", 2, 2, 0.5, 100, "Reverb length.");
+                box ("cChirp", "Chirp (%)", 3, 0, 5.0, 100, "0 = plain spring tank, 100 = every click becomes a falling 'pew'.");
+                box ("cSize", "Size (ms)", 3, 1, 5.0, 104, "Tank size.");
+                box ("cDamp", "Damping (%)", 3, 0, 10.0, 100, "Darkens the tail.");
                 break;
             case seed::FxSquash:
-                box ("kThr", "Threshold (dB)", 2, 1, 1.0, 112);
-                box ("kSlope", "Slope (1 off, 0 limit, <0 over)", 1, 2, 0.05, 200);
-                box ("kAtt", "Attack (ms)", 3, 2, 1.0, 110);
-                box ("kRel", "Release (ms)", 4, 1, 10.0, 116);
-                box ("kMake", "Makeup (dB)", 2, 1, 1.0, 104);
+                box ("kThr", "Threshold (dB)", 2, 1, 1.0, 112, "Level where compression starts.");
+                box ("kSlope", "Slope (1 off, 0 limit, <0 over)", 1, 2, 0.05, 210, "1 = no compression, 0.25 = 4:1, 0 = limiter, below 0 = over-compression (louder in = quieter out).");
+                box ("kAtt", "Attack (ms)", 3, 2, 1.0, 110, "How fast it clamps down.");
+                box ("kRel", "Release (ms)", 4, 1, 10.0, 116, "How fast it lets go.");
+                box ("kMake", "Makeup (dB)", 2, 1, 1.0, 104, "Gain after compression.");
                 break;
             default: break;
         }
-        for (auto& c : detail) addAndMakeVisible (*c);
+        holder.removeAllChildren();
+        for (auto& c : detail) holder.addAndMakeVisible (*c);
         layoutDetail();
         repaint();
     }
 
     void layoutDetail()
     {
-        auto area = getLocalBounds().withTrimmedLeft (376);
-        int x = area.getX(), y = area.getY() + 4, rowH = 48;
+        const int w = juce::jmax (100, viewport.getWidth() - viewport.getScrollBarThickness() - 4);
+        int x = 4, y = 4;
+        bool any = false; // something already placed on this row?
         for (auto& it : items)
         {
-            if (it.c == nullptr || x + it.w > area.getRight()) { x = area.getX(); y += rowH + 10; if (it.c == nullptr) continue; }
+            if (it.c == nullptr) { if (any) { x = 4; y += 52; any = false; } continue; }
+            if (x + it.w > w && any) { x = 4; y += 52; }
             it.c->setBounds (x, y, it.w, 48);
-            x += it.w + 14;
+            x += it.w + 12;
+            any = true;
         }
+        if (! any) y -= 52;
+        holder.setSize (w, y + 52);
     }
 
     struct Item { juce::Component* c; int w; };
     SeedProcessor& proc;
-    int selected = 1, shownType = -1;
+    int selected = 1, shownType = -1, scroll = 0, maxScroll = 0;
+    juce::Viewport viewport;
+    juce::Component holder;
     std::vector<std::unique_ptr<juce::Component>> detail;
     std::vector<Item> items;
     std::vector<juce::Rectangle<int>> rows;
+    juce::Rectangle<int> listViewport;
 };

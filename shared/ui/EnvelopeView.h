@@ -4,7 +4,7 @@
 //   Attack  : linear rise to full level
 //   Decay   : exponential fall towards the sustain level (99.9% of the way after "decay" ms)
 //   Sustain : the level held while the key is down
-//   Release : exponential fall to silence (-60 dB after "release" ms)
+//   Release : exponential fall to silence (-60 dB after "release" ms; the real tail continues to -100 dB, then ends)
 // These are the SAME formulas the synth engines use, so the picture is the truth.
 //
 // Time axis: each segment's width grows with the square root of its time, so both 2 ms and

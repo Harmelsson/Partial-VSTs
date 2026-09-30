@@ -13,14 +13,25 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
       minDipBox (p (ids::minDip), "Min dip (%)", 2, 1, 1.0),
       toleranceBox (p (ids::tolerance), "Tolerance (c)", 2, 1, 0.5),
       minSharedBox (p (ids::minShared), "Min shared", 1, 0, 1.0),
-      methodSeg (p (ids::method), "Scale method", { "Dissonance", "Consonance", "Imported" })
+      edoStepsBox (p (ids::edoSteps), "Steps", 3, 0, 1.0),
+      methodBox (p (ids::method), "Scale method", seed::methodNames()),
+      modPanel (pr)
 {
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &prevPreset, &presetName, &nextPreset, &savePreset, &scopeBtn, &fundamentalBox, &seedBox, &partialsBox,
-             &rolloffBox, &methodSeg, &minDipBox, &toleranceBox, &minSharedBox, &resetEdits, &diceTuning, &curvePlot,
-             &partialsPlot, &scaleTable, &partialsTable, &dicePage, &mutatePage, &resetPage, &initAll, &importScl,
-             &exportScl, &fitSeed })
+             &rolloffBox, &methodBox, &minDipBox, &toleranceBox, &minSharedBox, &edoStepsBox, &lockScale, &resetEdits,
+             &diceTuning, &curvePlot, &partialsPlot, &scaleTable, &partialsTable, &dicePage, &mutatePage, &resetPage,
+             &initAll, &importScl, &exportScl, &fitSeed, &modPanel })
         addAndMakeVisible (c);
+
+    // Tooltips for the calculator row (hover ~0.6 s).
+    fundamentalBox.setTooltip (seed::helpFor (ids::fundamental)); seedBox.setTooltip (seed::helpFor (ids::seed));
+    partialsBox.setTooltip (seed::helpFor (ids::partials)); rolloffBox.setTooltip (seed::helpFor (ids::rolloff));
+    minDipBox.setTooltip (seed::helpFor (ids::minDip)); toleranceBox.setTooltip (seed::helpFor (ids::tolerance));
+    minSharedBox.setTooltip (seed::helpFor (ids::minShared)); edoStepsBox.setTooltip (seed::helpFor (ids::edoSteps));
+    methodBox.setTooltip ("How the scale's notes are found: Dissonance / Consonance = calculated from the partials; Imported = a Scala file; EDO = N equal steps of 1200 cents; Seed-EDO = N equal steps of the seed's 'octave'.");
+    lockScale.setTooltip ("Freeze the scale: the notes stay exactly where they are while you change the seed, partials or method. The curve keeps updating so you can see the locked notes against the new sound. Unlocking recalculates the scale (you are asked first).");
+    lockScale.onClick = [this] { onLockClicked(); };
 
     // ---- Scala ---------------------------------------------------------------------------------
     // Import = load a .scl as the scale (method -> Imported; the partials stay yours, the curve shows
@@ -101,7 +112,12 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
     // ---- Chaos + reset ----------------------------------------------------------------------
     diceTuning.onClick = [this] { proc.randomize (SeedProcessor::Scope::Tuning, 1.0); };
     // The FX page's buttons act on the selected rack slot.
-    auto idsOfPage = [this] { return currentTab == 4 && fxRack != nullptr ? fxRack->pageIds() : pageIds[(size_t) currentTab]; };
+    auto idsOfPage = [this] {
+        if (currentTab != 3 || fxPage == nullptr) return pageIds[(size_t) currentTab];
+        auto a = fxPage->rack.pageIds();
+        a.addArray (fxPage->eq.bandIds());
+        return a;
+    };
     dicePage.onClick = [this, idsOfPage] { proc.randomizeParams (idsOfPage(), 1.0); };
     mutatePage.onClick = [this, idsOfPage] { proc.randomizeParams (idsOfPage(), 0.15); };
     resetPage.onClick = [this, idsOfPage] { proc.resetParams (idsOfPage()); };
@@ -117,7 +133,7 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
     buildPages();
     showTab (0);
 
-    setSize (1200, 900);
+    setSize (kMainW + kModW + 12, 960);
     lastTick = juce::Time::getMillisecondCounterHiRes();
     timerCallback();
     startTimerHz (60);
@@ -130,6 +146,27 @@ void SeedEditor::setParam (const juce::String& id, double value)
     auto& prm = p (id);
     const auto& r = prm.getNormalisableRange();
     prm.setValueNotifyingHost (prm.convertTo0to1 ((float) juce::jlimit ((double) r.start, (double) r.end, value)));
+}
+
+void SeedEditor::onLockClicked()
+{
+    if (! proc.scaleLocked()) { proc.setScaleLocked (true); return; }
+    // Unlocking recalculates the scale from the current settings: the notes will change. Ask first.
+    juce::Component::SafePointer<SeedEditor> safe (this);
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                      .withTitle ("Unlock the scale?")
+                                      .withMessage ("The scale will change.\n\nUnlocking recalculates the notes from the current seed, partials and method, "
+                                                    "so the notes you have now will be replaced.")
+                                      .withButton ("Unlock")
+                                      .withButton ("Keep locked")
+                                      .withAssociatedComponent (this),
+                                  [safe] (int result) { if (safe != nullptr && result == 1) safe->proc.setScaleLocked (false); });
+}
+
+void SeedEditor::modDroppedOn (juce::RangedAudioParameter& prm, int mod)
+{
+    proc.addModLink (mod, prm.getParameterID(), 100.0f);
 }
 
 void SeedEditor::refreshPresetLabel()
@@ -236,7 +273,7 @@ void SeedEditor::wireCalculatorEditing()
 // ================================================================================================
 void SeedEditor::buildPages()
 {
-    const char* names[kTabs] = { "Keys & pitch", "Envelope", "Timbre", "Filter & noise", "FX", "Modulators" };
+    const char* names[kTabs] = { "Keys & pitch", "Envelope", "Timbre", "FX" };
     for (int t = 0; t < kTabs; ++t)
     {
         tabButtons[(size_t) t] = std::make_unique<pvst::FlatButton> (names[t]);
@@ -248,18 +285,23 @@ void SeedEditor::buildPages()
     auto box = [this, pageOf] (ControlPage& pg, const juce::String& id, const juce::String& label, int intD, int dec, double step, int w = 104) {
         pageOf (pg).add (id);
         auto c = std::make_unique<pvst::ScrubBox> (p (id), label, intD, dec, step);
+        c->setTooltip (seed::helpFor (id));
         pg.add (*c, w);
         owned.push_back (std::move (c));
     };
     auto seg = [this, pageOf] (ControlPage& pg, const juce::String& id, const juce::String& label, juce::StringArray opts, int w) {
         pageOf (pg).add (id);
         auto c = std::make_unique<pvst::SegmentedChoice> (p (id), label, opts);
+        c->setTooltip (seed::helpFor (id));
         pg.add (*c, w);
         owned.push_back (std::move (c));
     };
-    auto choice = [this, pageOf] (ControlPage& pg, const juce::String& id, const juce::String& label, juce::StringArray opts, int w) {
-        pageOf (pg).add (id);
-        auto c = std::make_unique<pvst::ChoiceBox> (p (id), label, opts);
+    /// Hz-or-BPM rate in ONE control (v0.6): Hz box, or a scrollable division with straight / t / dotted versions.
+    auto rate = [this, pageOf] (ControlPage& pg, const char* syncId, const char* hzId, const char* beatId, const juce::String& label,
+                                int intD, int dec, double step, int w, const juce::String& help) {
+        for (auto* id : { syncId, hzId, beatId }) pageOf (pg).add (id);
+        auto c = std::make_unique<pvst::RateControl> (p (syncId), p (hzId), p (beatId), label, intD, dec, step);
+        c->setHelp (help);
         pg.add (*c, w);
         owned.push_back (std::move (c));
     };
@@ -274,6 +316,14 @@ void SeedEditor::buildPages()
 
     auto& keys = pages[0];
     seg (keys, ids::keyMode, "Key mode (how keys become pitches)", keyModeNames(), 330);
+    {
+        auto c = std::make_unique<pvst::ScrubBox> (p (ids::baseKey), "Base key (plays the unison)", 3, 0, 1.0);
+        c->suffix = [] (double n) { return juce::MidiMessage::getMidiNoteName (juce::roundToInt (n), true, true, 4); };
+        c->setTooltip (seed::helpFor (ids::baseKey));
+        pageIds[0].add (ids::baseKey);
+        keys.add (*c, 190);
+        owned.push_back (std::move (c));
+    }
     box (keys, ids::magnet, "Magnet (%)", 3, 0, 5.0);
     box (keys, ids::life, "Life (%)", 3, 0, 5.0);
     box (keys, ids::glide, "Glide (ms)", 4, 0, 10.0);
@@ -289,6 +339,7 @@ void SeedEditor::buildPages()
     {
         auto c = std::make_unique<pvst::ScrubBox> (p (ids::droneNote), "Drone note", 3, 0, 1.0);
         c->suffix = [] (double n) { return juce::MidiMessage::getMidiNoteName (juce::roundToInt (n), true, true, 4); };
+        c->setTooltip (seed::helpFor (ids::droneNote));
         pageIds[0].add (ids::droneNote);
         keys.add (*c, 140);
         owned.push_back (std::move (c));
@@ -313,9 +364,7 @@ void SeedEditor::buildPages()
     box (timbre, ids::oddEven, "Odd/Even (%)", 3, 0, 5.0);
     box (timbre, ids::spread, "Stereo spread (%)", 3, 0, 5.0, 120);
     box (timbre, ids::shimmer, "Shimmer (%)", 3, 0, 5.0);
-    box (timbre, ids::shimmerRate, "Shimmer (Hz)", 2, 2, 0.1);
-    seg (timbre, ids::shimmerSync, "Shimmer rate", { "Hz", "BPM" }, 90);
-    choice (timbre, ids::shimmerDiv, "Shimmer div", syncDivNames(), 90);
+    rate (timbre, ids::shimmerSync, ids::shimmerRate, ids::shimmerBeat, "Shimmer rate", 2, 2, 0.1, 210, seed::helpFor (ids::shimmerRate));
     box (timbre, ids::formFreq, "Formant (Hz)", 5, 0, 10.0, 112);
     box (timbre, ids::formGain, "Formant (dB)", 2, 1, 1.0);
     timbre.newLine();
@@ -323,54 +372,26 @@ void SeedEditor::buildPages()
     box (timbre, ids::formWidth, "Formant (oct)", 1, 2, 0.1);
     caption (timbre, "CHAOS (synth only)", 150);
     box (timbre, ids::wander, "Wander (c)", 3, 1, 5.0);
-    box (timbre, ids::wanderRate, "Wander (Hz)", 2, 2, 0.1);
-    seg (timbre, ids::wanderSync, "Wander rate", { "Hz", "BPM" }, 90);
-    choice (timbre, ids::wanderDiv, "Wander div", syncDivNames(), 90);
+    rate (timbre, ids::wanderSync, ids::wanderRate, ids::wanderBeat, "Wander rate", 2, 2, 0.1, 210, seed::helpFor (ids::wanderRate));
     box (timbre, ids::scramble, "Scramble (%)", 3, 0, 5.0);
 
-    auto& filt = pages[3];
-    seg (filt, ids::filterMode, "Filter (per voice, after the partials)", filterModeNames(), 420);
-    box (filt, ids::cutoff, "Cutoff (Hz)", 5, 0, 10.0, 112);
-    box (filt, ids::reso, "Resonance (%)", 3, 0, 5.0);
-    filt.newLine();
-    box (filt, ids::keyTrack, "Key track (%)", 3, 0, 5.0);
-    box (filt, ids::filterEnv, "Filter env (oct)", 1, 2, 0.5, 116);
-    box (filt, ids::filterDecay, "Filter decay (ms)", 4, 0, 10.0, 120);
-    box (filt, ids::noise, "Noise (dB)", 2, 1, 1.0);
-
-    auto& fx = pages[4];
+    auto& fx = pages[3];
     {
-        auto rack = std::make_unique<FxRackView> (proc);
-        fxRack = rack.get();
-        fx.fill (*rack);
-        owned.push_back (std::move (rack));
-    }
-
-    auto& mod = pages[5];
-    for (int m = 1; m <= kNumMods; ++m)
-    {
-        choice (mod, ids::modShape (m), "Mod " + juce::String (m) + " shape", modShapeNames(), 110);
-        seg (mod, ids::modSync (m), "Rate in", { "Hz", "BPM" }, 90);
-        box (mod, ids::modRate (m), "Rate (Hz)", 2, 3, 0.1, 104);
-        choice (mod, ids::modDiv (m), "Division", syncDivNames(), 96);
-        box (mod, ids::modDepth (m), "Depth (%)", 3, 3, 0.1, 124); // 3 decimals: seed moves are drastic
-        choice (mod, ids::modTarget (m), "Target", modTargetNames(), 130);
-        auto meter = std::make_unique<ModMeter> (proc.uiModValue[(size_t) m - 1]);
-        meters.push_back (meter.get());
-        mod.add (*meter, 44);
-        owned.push_back (std::move (meter));
-        mod.newLine();
+        auto page = std::make_unique<FxPage> (proc);
+        fxPage = page.get();
+        fx.fill (*page);
+        owned.push_back (std::move (page));
     }
 }
 
 void SeedEditor::showTab (int index)
 {
     currentTab = juce::jlimit (0, kTabs - 1, index);
+    static const char* names[kTabs] = { "Keys & pitch", "Envelope", "Timbre", "FX" };
     for (int t = 0; t < kTabs; ++t)
     {
         pages[(size_t) t].setVisible (t == currentTab);
-        tabButtons[(size_t) t]->setText ((t == currentTab ? "> " : "") + juce::String (std::initializer_list<const char*> {
-            "Keys & pitch", "Envelope", "Timbre", "Filter & noise", "FX", "Modulators" }.begin()[t]));
+        tabButtons[(size_t) t]->setText ((t == currentTab ? "> " : "") + juce::String (names[t]));
     }
 }
 
@@ -404,27 +425,49 @@ void SeedEditor::timerCallback()
     partialsPlot.setPartials (model, settings.seed, settings.fundamentalHz);
     partialsTable.setPartials (model, settings.fundamentalHz);
 
-    // Played notes light up (ArtHar): a held key's note = its pitch folded into one period,
-    // matched to the nearest scale note within 15 cents. Released notes fade (0.18 s half-life).
-    emphasis.resize ((size_t) fin.count, 0.0f);
-    std::vector<bool> lit ((size_t) fin.count, false);
-    const double period = std::max (1.0, fin.period);
-    for (auto& h : proc.uiHeld)
+    // Played notes light up (ArtHar). A held key's note = its pitch folded into one period, matched to the
+    // nearest scale note (always the nearest: in Scale mode it is exact, but while the seed is being
+    // scrubbed the engine's scale and the drawn one can differ by many cents; the other key modes have
+    // keys that fall between scale notes). Every note-on is also latched by the
+    // processor, so a note shorter than one refresh still lights for at least 140 ms (v0.6: the old
+    // code only looked at the keys held at the instant of each refresh, so short notes flickered).
+    // Released notes fade (0.18 s half-life).
     {
-        const float c = h.load (std::memory_order_relaxed);
-        if (std::isnan (c)) continue;
-        double pc = std::fmod ((double) c, period);
-        if (pc < 0) pc += period;
-        for (int i = 0; i < fin.count; ++i)
+        emphasis.resize ((size_t) fin.count, 0.0f);
+        litUntil.resize ((size_t) fin.count, 0.0);
+        std::vector<bool> lit ((size_t) fin.count, false);
+        const double period = std::max (1.0, fin.period);
+        auto light = [&] (double cents, bool latch) {
+            double pc = std::fmod (cents, period);
+            if (pc < 0) pc += period;
+            int best = -1;
+            double bestD = 1e18;
+            for (int i = 0; i < fin.count; ++i)
+            {
+                const auto& n = fin.notes[(size_t) i];
+                if (! n.enabled || n.kind == xen::ScaleNote::Period) continue;
+                double d = std::abs (n.cents - pc);
+                if (n.kind == xen::ScaleNote::Unison) d = std::min (d, period - pc); // the unison is also the period
+                if (d < bestD) { bestD = d; best = i; }
+            }
+            if (best < 0) return;
+            lit[(size_t) best] = true;
+            if (latch) litUntil[(size_t) best] = now + 140.0;
+        };
+        for (auto& h : proc.uiHeld)
         {
-            const double nc = fin.notes[(size_t) i].cents;
-            if (std::abs (nc - pc) < 15.0 || (fin.notes[(size_t) i].kind == xen::ScaleNote::Unison && std::abs (period - pc) < 15.0))
-                lit[(size_t) i] = true;
+            const float c = h.load (std::memory_order_relaxed);
+            if (! std::isnan (c)) light ((double) c, false);
         }
+        const uint32_t seq = proc.uiHitSeq.load (std::memory_order_acquire);
+        if (seq - hitsSeen > (uint32_t) SeedProcessor::kHitRing) hitsSeen = seq - (uint32_t) SeedProcessor::kHitRing;
+        for (; hitsSeen != seq; ++hitsSeen)
+            light ((double) proc.uiHitCents[hitsSeen % (uint32_t) SeedProcessor::kHitRing].load (std::memory_order_relaxed), true);
+        for (size_t i = 0; i < lit.size(); ++i) if (now < litUntil[i]) lit[i] = true;
+        const float fade = std::pow (0.5f, dt / 0.18f);
+        for (size_t i = 0; i < emphasis.size(); ++i) emphasis[i] = lit[i] ? 1.0f : (emphasis[i] * fade < 0.01f ? 0.0f : emphasis[i] * fade);
+        curvePlot.setEmphasis (emphasis);
     }
-    const float fade = std::pow (0.5f, dt / 0.18f);
-    for (size_t i = 0; i < emphasis.size(); ++i) emphasis[i] = lit[i] ? 1.0f : (emphasis[i] * fade < 0.01f ? 0.0f : emphasis[i] * fade);
-    curvePlot.setEmphasis (emphasis);
 
     // Where the keys land for the chosen key mode (v0.5). Key C4 (60) = the unison, except in
     // 12-EDO where keys keep their normal pitches (so the unison sits wherever the Fundamental is).
@@ -432,8 +475,9 @@ void SeedEditor::timerCallback()
         const int keyMode = (int) std::lround (p (ids::keyMode).convertFrom0to1 (p (ids::keyMode).getValue()));
         const double per = fin.valid ? fin.period : std::abs (xen::periodCents (settings.seed));
         const double edoOffset = 1200.0 * std::log2 (seed::kC4 / settings.fundamentalHz); // C4 relative to the unison
-        std::array<double, 80> pc {}, pst {};
-        const int np = fin.valid ? fin.playable (pc.data(), pst.data(), 80) : 0;
+        std::array<double, xen::kMaxFinalNotes> pc {}, pst {};
+        const int np = fin.valid ? fin.playable (pc.data(), pst.data(), (int) pc.size()) : 0;
+        const int baseKey = (int) std::lround (p (ids::baseKey).convertFrom0to1 (p (ids::baseKey).getValue()));
         const double magnet = p (ids::magnet).convertFrom0to1 (p (ids::magnet).getValue()) / 100.0;
         std::vector<pvst::CurvePlot::KeyMarker> km;
         for (int k = 0; k < 40; ++k)
@@ -453,7 +497,7 @@ void SeedEditor::timerCallback()
                 }
                 c = base + magnet * (best - within);
             }
-            km.push_back ({ c, juce::MidiMessage::getMidiNoteName (60 + k, true, false, 4) });
+            km.push_back ({ c, juce::MidiMessage::getMidiNoteName ((keyMode == seed::Keys12 ? 60 : baseKey) + k, true, false, 4) });
         }
         curvePlot.setKeyMarkers (std::move (km), keyMode == seed::KeysSeed12 || keyMode == seed::KeysMagnet, edoOffset);
     }
@@ -463,11 +507,16 @@ void SeedEditor::timerCallback()
     const int method = (int) std::lround (p (ids::method).convertFrom0to1 (p (ids::method).getValue()));
     if (method != shownMethod) { shownMethod = method; layoutCalculatorRow(); }
 
+
     curvePlot.tick (dt);
     partialsPlot.tick (dt);
     if (envelopeView != nullptr && currentTab == 1) envelopeView->tick (dt);
-    for (auto* m : meters) m->tick();
-    if (fxRack != nullptr && currentTab == 4) fxRack->tick();
+    modPanel.tick();
+    if (fxPage != nullptr && currentTab == 3) { fxPage->rack.tick(); fxPage->eq.tick(); }
+    const bool locked = proc.scaleLocked();
+    curvePlot.setLocked (locked);
+    lockScale.setActive (locked);
+    lockScale.setText (locked ? "LOCKED" : "Lock scale");
 
     const auto newInfo = "Stretch factor " + juce::String (xen::stretchFactor (settings.seed), 6)
                        + th::dot() + "\"octave\" " + juce::String (xen::periodCents (settings.seed), 4) + " cents"
@@ -478,6 +527,13 @@ void SeedEditor::timerCallback()
                                                           : "Imported: " + proc.importedScaleName())
                     + th::dot() + "period " + juce::String (fin.period, 2) + " c" + th::dot() + "Stretch factor "
                     + juce::String (xen::stretchFactor (settings.seed), 4);
+    if (settings.method == xen::Method::Edo || settings.method == xen::Method::SeedEdo)
+    {
+        const double per = settings.method == xen::Method::Edo ? 1200.0 : std::abs (xen::periodCents (settings.seed));
+        newInfoText = juce::String (settings.edoSteps) + (settings.method == xen::Method::Edo ? " equal steps of 1200 c" : " equal steps of the seed's \"octave\"")
+                    + th::dot() + "step " + juce::String (per / (double) settings.edoSteps, 3) + " c" + th::dot() + "period " + juce::String (per, 2) + " c";
+    }
+    if (proc.scaleLocked()) newInfoText = "SCALE LOCKED" + th::dot() + newInfoText;
     if (now < scalaMessageUntil) newInfoText = scalaMessage;
     if (newInfoText != info) { info = newInfoText; repaint (calcArea); }
 }
@@ -494,7 +550,7 @@ void SeedEditor::paint (juce::Graphics& g)
     g.setColour (th::mix (0.4f));
     g.setFont (th::sans (11.5f));
     const juce::String ver = juce::String ("v") + kVersion + th::dot() + "build " + PVST_BUILD_NUMBER + th::dot() + PVST_GIT_HASH;
-    g.drawText (ver, getLocalBounds().reduced (14, 0).removeFromTop (46), juce::Justification::centredRight);
+    g.drawText (ver, juce::Rectangle<int> (14, 0, kMainW - 28, 46), juce::Justification::centredRight);
 
     auto calcInner = th::drawSection (g, calcArea, "Calculator");
     g.setColour (th::dim());
@@ -510,7 +566,10 @@ void SeedEditor::paint (juce::Graphics& g)
 void SeedEditor::resized()
 {
     constexpr int m = 12, gap = 8;
-    auto b = getLocalBounds().reduced (m, 0);
+    // The modulator column lives at the far right; everything else is the old 1200-wide layout.
+    auto full = getLocalBounds();
+    modPanel.setBounds (full.removeFromRight (kModW + 12).withTrimmedRight (12).withTrimmedTop (46).withTrimmedBottom (10));
+    auto b = full.reduced (m, 0);
     auto header = b.removeFromTop (46).withTrimmedLeft (240).withSizeKeepingCentre (b.getWidth() - 480, 28);
     header = header.withWidth (590);
     prevPreset.setBounds (header.removeFromLeft (28)); header.removeFromLeft (4);
@@ -524,13 +583,13 @@ void SeedEditor::resized()
     calcArea = b.removeFromTop (100);
     layoutCalculatorRow();
     b.removeFromTop (gap);
-    auto middle = b.removeFromTop (430);
+    auto middle = b.removeFromTop (420);
     auto right = middle.removeFromRight (360);
     middle.removeFromRight (gap);
-    curvePlot.setBounds (middle.removeFromTop (230));
+    curvePlot.setBounds (middle.removeFromTop (225));
     middle.removeFromTop (gap);
     partialsPlot.setBounds (middle);
-    scaleTable.setBounds (right.removeFromTop (230));
+    scaleTable.setBounds (right.removeFromTop (225));
     right.removeFromTop (gap);
     partialsTable.setBounds (right);
     b.removeFromTop (gap);
@@ -549,24 +608,28 @@ void SeedEditor::resized()
 
 void SeedEditor::layoutCalculatorRow()
 {
-    const bool consonance = shownMethod == 1, imported = shownMethod == 2;
-    minDipBox.setVisible (! consonance && ! imported); // Imported: notes come from the file, no settings
+    const bool consonance = shownMethod == 1, imported = shownMethod == 2, edo = shownMethod >= 3;
+    minDipBox.setVisible (! consonance && ! imported && ! edo); // Imported / EDO: notes don't depend on it
     toleranceBox.setVisible (consonance);
     minSharedBox.setVisible (consonance);
+    edoStepsBox.setVisible (edo);
     auto row = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
     auto place = [&] (juce::Component& c, int w) { c.setBounds (row.removeFromLeft (w)); row.removeFromLeft (14); };
     place (fundamentalBox, 116);
     place (seedBox, 134);
     place (partialsBox, 66);
     place (rolloffBox, 78);
-    place (methodSeg, 270);
+    place (methodBox, 130);
     if (consonance) { place (toleranceBox, 98); place (minSharedBox, 80); }
+    else if (edo) place (edoStepsBox, 80);
     else if (! imported) place (minDipBox, 90);
     auto buttons = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
-    buttons = buttons.removeFromRight (200).withHeight (28).withY (buttons.getY() + 19);
+    buttons = buttons.removeFromRight (310).withHeight (28).withY (buttons.getY() + 19);
     diceTuning.setBounds (buttons.removeFromRight (96));
     buttons.removeFromRight (8);
     resetEdits.setBounds (buttons.removeFromRight (96));
+    buttons.removeFromRight (8);
+    lockScale.setBounds (buttons.removeFromRight (96));
     // Scala buttons: small, bottom-right, on the info line.
     auto sc = calcArea.reduced (10, 5).removeFromBottom (20).removeFromRight (300);
     fitSeed.setBounds (sc.removeFromRight (96));

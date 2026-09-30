@@ -1,5 +1,7 @@
 # Seed
 
+> Current version and feature list: `docs/PLAYGROUND.md` and `docs/STATUS.md` (this README is the v0.1-0.2 history).
+
 Stretched-partial additive synth: the seed idea (from ArtHar's calculator) made playable in FL.
 One number — the **seed** — bends the harmonic series so partial 2 lands on `seed:1` and every
 partial n sits at `n^log2(seed)`. Seed 2 = ordinary harmonics (a soft saw).

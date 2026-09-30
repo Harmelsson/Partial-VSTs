@@ -70,3 +70,26 @@ Format: **topic** — what happened → what to do instead. (date)
 ## New sessions start from `main` (2026-09-30)
 Work pushed only to a `claude/*` branch is invisible to the next session (it checks out `main`, and
 without CLAUDE.md on main it doesn't even know to look at other branches). Always also push to `main`.
+
+## Parameters + state (2026-09-30)
+- **APVTS saves PLAIN values in the state XML** (`<PARAM id="method" value="2.0"/>`: a choice is its
+  index, a float its real value). So appending choices to a list keeps old projects correct. Only the
+  host's *automation data* is normalised (index / (n-1)) and shifts when a list grows. Presets use plain values too.
+- **Modulation links are not parameters**: they live in an `apvts.state` property ("modLinks"), which
+  survives `replaceState`, and are mirrored to the audio thread via a fixed table of atomics (write
+  `param = -1` first, `param = index` last so the audio thread never sees a half-written slot).
+- **`AudioProcessorParameter::getParameterIndex()` is O(1)**: use it to index per-parameter arrays on
+  the audio thread instead of a hash map.
+- **Release that "cuts off"**: an exponential tail switched off at −60 dB is an audible step on headphones.
+  End voices at ≤ −100 dB. Check with `SeedTests --release` (prints the tail level every 25 ms).
+- **UI "is the note lit?" must not sample held keys only**: a note shorter than a UI refresh is never
+  seen. Latch note-ons on the audio thread (ring buffer + counter) and read them from the UI.
+- **Drag and drop between our own components**: the editor derives from `juce::DragAndDropContainer`;
+  sources call `findParentDragContainerFor(this)->startDragging("mod:N", ...)`; targets derive from
+  `juce::DragAndDropTarget` and find the editor via `dynamic_cast<ModDropHandler*>(container)`.
+- **`SettableTooltipClient::setTooltip` is not virtual**; give composite controls their own `setHelp`.
+- **`juce::Component::isShowing()` is false for an un-windowed editor** (headless snapshots) — use
+  `isVisible()` for timers that should also run in tests/snapshots.
+- **Linux container needs the JUCE dev packages** again in a fresh session:
+  `apt-get install -y libasound2-dev libxrandr-dev libxinerama-dev libxcursor-dev libgl-dev libfontconfig1-dev libxcomposite-dev xvfb libxext-dev`.
+

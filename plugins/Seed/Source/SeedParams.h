@@ -11,11 +11,12 @@
 // ID RULES: never rename or reuse an ID (FL projects and automation clips store them). Legacy
 // IDs stay even when unused (e.g. keysFollow, replaced by keyMode in v0.3).
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "SeedEngine.h"
 #include "xen/CalcModel.h"
 
 namespace seed
 {
-inline constexpr const char* kVersion = "0.5.0";
+inline constexpr const char* kVersion = "0.6.0";
 
 namespace ids
 {
@@ -74,6 +75,13 @@ namespace ids
     inline constexpr const char* wanderSync = "wanderSync";
     inline constexpr const char* wanderDiv = "wanderDiv";
 
+    // v0.6
+    inline constexpr const char* baseKey = "baseKey";       // the MIDI key that plays the unison
+    inline constexpr const char* scaleLock = "scaleLock";   // freeze the current scale (notes stay when the seed changes)
+    inline constexpr const char* edoSteps = "edoSteps";     // EDO / Seed-EDO methods: number of equal steps (1..120)
+    inline constexpr const char* shimmerBeat = "shimmerBeat";
+    inline constexpr const char* wanderBeat = "wanderBeat";
+
     // Generated per-item IDs.
     inline juce::String partialLevel (int n) { return "p" + juce::String (n) + "lvl"; }   // n = 1..64
     inline juce::String partialPos (int n) { return "p" + juce::String (n) + "pos"; }     // n = 2..64
@@ -90,14 +98,19 @@ namespace ids
     inline juce::String modDiv (int m) { return "mod" + juce::String (m) + "div"; }    // v0.5
     /// FX rack slot parameter (v0.5): fx(2, "mix") -> "fx2mix". Slots 1..kNumFx.
     inline juce::String fx (int slot, const char* name) { return "fx" + juce::String (slot) + name; }
+    inline juce::String modBeat (int m) { return "mod" + juce::String (m) + "beat"; }  // v0.6 (replaces modDiv)
+    /// 5-band EQ parameter (v0.6): eq(2, "freq") -> "eq2freq". Bands 1..kEqBands.
+    inline juce::String eq (int band, const char* name) { return "eq" + juce::String (band) + name; }
     inline juce::String modShape (int m) { return "mod" + juce::String (m) + "shape"; }    // m = 1..4
     inline juce::String modRate (int m) { return "mod" + juce::String (m) + "rate"; }
     inline juce::String modDepth (int m) { return "mod" + juce::String (m) + "depth"; }
     inline juce::String modTarget (int m) { return "mod" + juce::String (m) + "target"; }
 } // namespace ids
 
-inline constexpr int kNumMods = 4;
-inline constexpr int kNumFx = 5;
+inline constexpr int kNumMods = 8;     // v0.6: 8 modulators (was 4)
+inline constexpr int kLegacyMods = 4;  // mods 1..4 still carry the old single-target / division params
+inline constexpr int kNumFx = kBuses;  // v0.6: 12 rack slots (was 5)
+inline constexpr int kMaxEditableDegrees = xen::kEditableDegrees;
 
 // FX rack (v0.5). Slot parameter names (appended to "fx<slot>"):
 //   common : type, on, in (Chain/Partials), picks (morph over sendRuleNames), mix, pan, width
@@ -115,7 +128,46 @@ inline const juce::StringArray& fxInputNames()
     static const juce::StringArray a { "Chain", "Partials" };
     return a;
 }
-/// Tempo divisions for BPM sync, and their length in beats.
+/// Tempo divisions for BPM sync (v0.6): every base length comes in three flavours,
+/// straight / triplet ("t") / dotted ("."), e.g. "4/16", "4/16t", "4/16.". Choice index = base * 3 + flavour.
+/// Bases: 1/64, 1/32, then n/16 for n = 1..32, then 48/16 and 64/16 (3 and 4 bars of 4/4).
+inline constexpr int kBeatBases = 2 + 32 + 2;
+inline constexpr int kBeatChoices = kBeatBases * 3;
+inline double beatBaseLength (int base) // in quarter-note beats
+{
+    if (base == 0) return 0.0625;                 // 1/64 note
+    if (base == 1) return 0.125;                  // 1/32 note
+    if (base <= 33) return 0.25 * (base - 1);     // n/16 (a sixteenth = 0.25 beat)
+    return base == 34 ? 12.0 : 16.0;              // 48/16, 64/16
+}
+inline juce::String beatBaseName (int base)
+{
+    if (base == 0) return "1/64";
+    if (base == 1) return "1/32";
+    if (base <= 33) return juce::String (base - 1) + "/16";
+    return base == 34 ? "48/16" : "64/16";
+}
+inline const juce::StringArray& beatNames()
+{
+    static const juce::StringArray a = [] {
+        juce::StringArray n;
+        for (int b = 0; b < kBeatBases; ++b)
+            for (const char* f : { "", "t", "." }) n.add (beatBaseName (b) + f);
+        return n;
+    }();
+    return a;
+}
+/// Length in quarter-note beats of choice index i (flavour: 0 straight, 1 triplet x2/3, 2 dotted x3/2).
+inline double beatLength (int i)
+{
+    i = std::clamp (i, 0, kBeatChoices - 1);
+    const double base = beatBaseLength (i / 3);
+    return i % 3 == 1 ? base * 2.0 / 3.0 : i % 3 == 2 ? base * 1.5 : base;
+}
+/// Default for a division: 4/16 straight (one beat), 16/16 straight (one bar).
+inline constexpr int kBeatDefaultBeat = 5 * 3, kBeatDefaultBar = 17 * 3;
+
+/// OLD (v0.5) tempo divisions, kept only so the old division parameters still exist in projects.
 inline const juce::StringArray& syncDivNames()
 {
     static const juce::StringArray a { "4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/8", "1/16", "1/32",
@@ -128,9 +180,19 @@ inline double syncDivBeats (int i)
     return b[std::clamp (i, 0, 14)];
 }
 
+inline const juce::StringArray& methodNames()
+{
+    static const juce::StringArray a { "Dissonance", "Consonance", "Imported", "EDO", "Seed-EDO" };
+    return a;
+}
 inline const juce::StringArray& keyModeNames()
 {
     static const juce::StringArray a { "12-EDO", "Seed-12", "Scale", "Magnet" };
+    return a;
+}
+inline const juce::StringArray& eqSteepNames()
+{
+    static const juce::StringArray a { "12 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct" };
     return a;
 }
 inline const juce::StringArray& filterModeNames()
@@ -179,7 +241,7 @@ inline const juce::StringArray& modTargetIds()
 inline bool isTuningParam (const juce::String& id)
 {
     static const juce::StringArray core { ids::seed, ids::partials, ids::rolloff, ids::fundamental, ids::minDip,
-                                          ids::method, ids::tolerance, ids::minShared };
+                                          ids::method, ids::tolerance, ids::minShared, ids::edoSteps, ids::scaleLock };
     if (core.contains (id)) return true;
     if (id.startsWith ("p") && id.endsWith ("scl")) return id.substring (1, id.length() - 3).containsOnly ("0123456789");
     // Generated edit IDs: p{n}lvl, p{n}pos, cp{k}*, n{d}on/off, cn{k}*.

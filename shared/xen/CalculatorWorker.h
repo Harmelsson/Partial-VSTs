@@ -20,7 +20,10 @@ namespace xen
 {
 // Imported (v0.5): the notes come from a loaded Scala file instead of being found; the dissonance
 // curve is still drawn (over the imported period) so you can see how well the timbre fits them.
-enum class Method { Dissonance = 0, Consonance = 1, Imported = 2 };
+// Edo / SeedEdo (v0.6): N equal steps of 1200 cents / of the seed's "octave". The notes are not found
+// by the calculator, they are simply placed; the curve is still drawn so you can see how well the
+// timbre fits each step, and each note's strength = how deep a dissonance valley it sits in.
+enum class Method { Dissonance = 0, Consonance = 1, Imported = 2, Edo = 3, SeedEdo = 4 };
 
 struct CalculatorSettings
 {
@@ -34,13 +37,14 @@ struct CalculatorSettings
     int minShared = 2;              // consonance
     PartialEdits edits;             // hand edits + custom partials (default = none)
     std::vector<double> imported;   // Imported method: cents, rising, no unison, last = period
+    int edoSteps = 12;              // Edo / SeedEdo: number of equal steps (1..120)
 
     bool operator== (const CalculatorSettings& o) const
     {
         auto eq = [] (double a, double b) { return juce::exactlyEqual (a, b); };
         if (! (eq (fundamentalHz, o.fundamentalHz) && eq (seed, o.seed) && partials == o.partials && eq (rolloff, o.rolloff)
                && eq (minStrength, o.minStrength) && method == o.method && eq (toleranceCents, o.toleranceCents)
-               && minShared == o.minShared && imported == o.imported))
+               && minShared == o.minShared && imported == o.imported && edoSteps == o.edoSteps))
             return false;
         for (size_t i = 0; i < edits.levelDb.size(); ++i)
             if (! eq (edits.levelDb[i], o.edits.levelDb[i]) || ! eq (edits.posCents[i], o.edits.posCents[i]) || edits.inScale[i] != o.edits.inScale[i]) return false;
@@ -141,7 +145,15 @@ private:
                 finished = con.compute (positions, periodCents (job.seed), cs, out.curve, out.searchComplete, stop);
             }
             else if (job.method == Method::Imported)
-                finished = computeImported (dis, job, out.curve, stop);
+                finished = computeImported (dis, job, job.imported, out.curve, stop);
+            else if (job.method == Method::Edo || job.method == Method::SeedEdo)
+            {
+                const double period = job.method == Method::Edo ? 1200.0 : std::abs (periodCents (job.seed));
+                std::vector<double> steps; // rising, no unison, last = period
+                if (period >= 10.0)
+                    for (int k = 1; k <= std::clamp (job.edoSteps, 1, 120); ++k) steps.push_back (period * k / std::clamp (job.edoSteps, 1, 120));
+                finished = computeImported (dis, job, steps, out.curve, stop);
+            }
             else
                 finished = dis.compute (job.makePartials(), periodCents (job.seed), job.minStrength, out.curve, stop);
             out.millis = juce::Time::getMillisecondCounterHiRes() - t0;
@@ -158,19 +170,20 @@ private:
     /// Imported method: the curve over the imported period (no dips kept), then the imported notes
     /// with a strength = how deep a dissonance valley each one sits in (1 if there are no partials).
     template <typename StopFn>
-    static bool computeImported (DissonanceCalculator& dis, const CalculatorSettings& job, CurveResult& out, StopFn&& stop)
+    static bool computeImported (DissonanceCalculator& dis, const CalculatorSettings& job, const std::vector<double>& list,
+                                 CurveResult& out, StopFn&& stop)
     {
         out = {};
-        if (job.imported.empty() || job.imported.back() <= 1.0) return true; // nothing loaded: invalid scale
-        const double period = job.imported.back();
+        if (list.empty() || list.back() <= 1.0) return true; // nothing loaded: invalid scale
+        const double period = list.back();
         const auto partials = job.makePartials();
         if (! dis.compute (partials, period, 2.0 /* > any strength: keep no dips */, out, stop)) return false;
         out.periodCents = period;
         out.notes.clear();
         out.notes.push_back ({ 0.0, importedStrength (dis, partials, 0.0), ScaleNote::Unison });
-        for (size_t i = 0; i + 1 < job.imported.size(); ++i)
-            if (job.imported[i] > 0.5 && job.imported[i] < period - 0.5)
-                out.notes.push_back ({ job.imported[i], importedStrength (dis, partials, job.imported[i]), ScaleNote::Found });
+        for (size_t i = 0; i + 1 < list.size(); ++i)
+            if (list[i] > 0.5 && list[i] < period - 0.5)
+                out.notes.push_back ({ list[i], importedStrength (dis, partials, list[i]), ScaleNote::Found });
         out.notes.push_back ({ period, importedStrength (dis, partials, period), ScaleNote::Period });
         out.valid = true;
         return true;

@@ -39,7 +39,11 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterFloat> (L, ParameterID { ids::seed, v1 }, "Seed", NormalisableRange<float> (0.5f, 4.0f, 0.0f), 2.0f, fmt (6, ""));
     add<AudioParameterInt> (L, ParameterID { ids::partials, v1 }, "Partials", 1, xen::kSeriesPartials, 16);
     add<AudioParameterFloat> (L, ParameterID { ids::rolloff, v1 }, "Rolloff", NormalisableRange<float> (0.0f, 3.0f, 0.0f), 1.0f, fmt (2, ""));
-    add<AudioParameterChoice> (L, ParameterID { ids::method, v3 }, "Scale method", StringArray { "Dissonance", "Consonance", "Imported" }, 0);
+    add<AudioParameterChoice> (L, ParameterID { ids::method, v3 }, "Scale method", methodNames(), 0);
+    // v0.6: EDO / Seed-EDO methods: the notes are N equal steps of 1200 c / of the seed's "octave".
+    add<AudioParameterInt> (L, ParameterID { ids::edoSteps, 7 }, "EDO steps", 1, 120, 12);
+    // v0.6: freeze the current scale. The notes stay while seed / partials / method change.
+    add<AudioParameterBool> (L, ParameterID { ids::scaleLock, 7 }, "Scale lock", false);
     add<AudioParameterFloat> (L, ParameterID { ids::minDip, v2 }, "Min dip strength", NormalisableRange<float> (0.0f, 50.0f, 0.0f), 2.0f, fmt (1, "%"));
     add<AudioParameterFloat> (L, ParameterID { ids::tolerance, v3 }, "Consonance tolerance", NormalisableRange<float> (0.5f, 30.0f, 0.0f), 5.0f, fmt (1, "c"));
     add<AudioParameterInt> (L, ParameterID { ids::minShared, v3 }, "Min shared partials", 1, 8, 2);
@@ -95,6 +99,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterInt> (L, ParameterID { ids::droneNote, v1 }, "Drone note", 24, 96, 48);
 
     // Keys + pitch.
+    add<AudioParameterInt> (L, ParameterID { ids::baseKey, 7 }, "Base key (plays the unison)", 0, 127, 60);
     add<AudioParameterChoice> (L, ParameterID { ids::keyMode, v3 }, "Key mode", keyModeNames(), 2); // v0.4 default: Scale (user picks keys by switching notes on/off)
     add<AudioParameterFloat> (L, ParameterID { ids::magnet, v3 }, "Magnet", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 100.0f, fmt (0, "%"));
     add<AudioParameterFloat> (L, ParameterID { ids::life, v3 }, "Life", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 0.0f, fmt (0, "%"));
@@ -133,16 +138,20 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     // ---- v0.5 ------------------------------------------------------------------------------
     const int v5 = 6;
     add<AudioParameterBool> (L, ParameterID { ids::shimmerSync, v5 }, "Shimmer sync (BPM)", false);
-    add<AudioParameterChoice> (L, ParameterID { ids::shimmerDiv, v5 }, "Shimmer division", syncDivNames(), 4);
+    add<AudioParameterChoice> (L, ParameterID { ids::shimmerDiv, v5 }, "Shimmer division (old)", syncDivNames(), 4);
     add<AudioParameterBool> (L, ParameterID { ids::wanderSync, v5 }, "Wander sync (BPM)", false);
-    add<AudioParameterChoice> (L, ParameterID { ids::wanderDiv, v5 }, "Wander division", syncDivNames(), 2);
+    add<AudioParameterChoice> (L, ParameterID { ids::wanderDiv, v5 }, "Wander division (old)", syncDivNames(), 2);
+    // ---- v0.6: one division list with straight / triplet / dotted versions (the old *Div params stay, unused).
+    const int v7 = 7;
+    add<AudioParameterChoice> (L, ParameterID { ids::shimmerBeat, v7 }, "Shimmer division", beatNames(), kBeatDefaultBeat);
+    add<AudioParameterChoice> (L, ParameterID { ids::wanderBeat, v7 }, "Wander division", beatNames(), kBeatDefaultBar);
 
     // FX rack: 5 slots, processed top to bottom. Default: delay, rough reverb, chirp reverb (all
     // silent until their Mix is raised), a transparent Squash comp, and an empty slot.
-    const int defType[kNumFx] = { FxDelay, FxRough, FxChirp, FxSquash, FxOff };
-    const int defIn[kNumFx] = { 1, 1, 0, 0, 0 };
-    const float defPicks[kNumFx] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-    const float defMix[kNumFx] = { 0.0f, 0.0f, 0.0f, 100.0f, 0.0f };
+    const int defType[kNumFx] = { FxDelay, FxRough, FxChirp, FxSquash, FxOff, FxOff, FxOff, FxOff, FxOff, FxOff, FxOff, FxOff };
+    const int defIn[kNumFx] = { 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    const float defPicks[kNumFx] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    const float defMix[kNumFx] = { 0.0f, 0.0f, 0.0f, 100.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
     for (int sl = 1; sl <= kNumFx; ++sl)
     {
         const String P = "FX " + String (sl) + " ";
@@ -166,7 +175,8 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         // Partial Delay
         add<AudioParameterFloat> (L, ParameterID { F ("dTime"), v5 }, P + "delay time", skewed (1.0f, 4000.0f, 300.0f), 350.0f, fmt (2, "ms"));
         add<AudioParameterBool> (L, ParameterID { F ("dSync"), v5 }, P + "delay sync (BPM)", false);
-        add<AudioParameterChoice> (L, ParameterID { F ("dDiv"), v5 }, P + "delay division", syncDivNames(), 5);
+        add<AudioParameterChoice> (L, ParameterID { F ("dDiv"), v5 }, P + "delay division (old)", syncDivNames(), 5);
+        add<AudioParameterChoice> (L, ParameterID { F ("dBeat"), v7 }, P + "delay division", beatNames(), 3 * 3); // 2/16 = an eighth
         add<AudioParameterFloat> (L, ParameterID { F ("dFb"), v5 }, P + "delay feedback", NormalisableRange<float> (0.0f, 95.0f, 0.0f), 45.0f, fmt (1, "%"));
         add<AudioParameterFloat> (L, ParameterID { F ("dSpiral"), v5 }, P + "delay spiral", NormalisableRange<float> (-1200.0f, 1200.0f, 0.0f), 0.0f, fmt (2, "c"));
         add<AudioParameterFloat> (L, ParameterID { F ("dPing"), v5 }, P + "delay ping-pong", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 100.0f, fmt (0, "%"));
@@ -188,15 +198,37 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         add<AudioParameterFloat> (L, ParameterID { F ("kMake"), v5 }, P + "squash makeup", NormalisableRange<float> (0.0f, 24.0f, 0.0f), 0.0f, fmt (1, "dB"));
     }
 
-    // Modulators (random modifiers and friends).
+    // Modulators (random modifiers and friends). v0.6: 8 of them; targets are LINKS made by dragging a
+    // modulator onto a field (stored in the plugin state, not as parameters). Mods 1-4 keep their old
+    // single-target / division parameters as legacy (old projects are converted to links on load).
     for (int m = 1; m <= kNumMods; ++m)
     {
         add<AudioParameterChoice> (L, ParameterID { ids::modShape (m), v3 }, "Mod " + String (m) + " shape", modShapeNames(), 5);
         add<AudioParameterFloat> (L, ParameterID { ids::modRate (m), v3 }, "Mod " + String (m) + " rate", skewed (0.01f, 20.0f, 1.0f), 0.3f, fmt (3, "Hz"));
         add<AudioParameterFloat> (L, ParameterID { ids::modDepth (m), v3 }, "Mod " + String (m) + " depth", NormalisableRange<float> (-100.0f, 100.0f, 0.0f), 0.0f, fmt (3, "%"));
-        add<AudioParameterChoice> (L, ParameterID { ids::modTarget (m), v3 }, "Mod " + String (m) + " target", modTargetNames(), 0);
-        add<AudioParameterBool> (L, ParameterID { ids::modSync (m), 6 }, "Mod " + String (m) + " sync (BPM)", false);
-        add<AudioParameterChoice> (L, ParameterID { ids::modDiv (m), 6 }, "Mod " + String (m) + " division", syncDivNames(), 2);
+        if (m <= kLegacyMods)
+            add<AudioParameterChoice> (L, ParameterID { ids::modTarget (m), v3 }, "Mod " + String (m) + " target (old)", modTargetNames(), 0);
+        add<AudioParameterBool> (L, ParameterID { ids::modSync (m), m <= kLegacyMods ? 6 : 7 }, "Mod " + String (m) + " sync (BPM)", false);
+        if (m <= kLegacyMods)
+            add<AudioParameterChoice> (L, ParameterID { ids::modDiv (m), 6 }, "Mod " + String (m) + " division (old)", syncDivNames(), 2);
+        add<AudioParameterChoice> (L, ParameterID { ids::modBeat (m), v7 }, "Mod " + String (m) + " division", beatNames(), kBeatDefaultBar);
+    }
+
+    // 5-band EQ (per voice, before the FX rack). Bands start switched off.
+    const int defEqType[kEqBands] = { pvst::eq::LowShelf, pvst::eq::Bell, pvst::eq::Bell, pvst::eq::Bell, pvst::eq::HighShelf };
+    const float defEqFreq[kEqBands] = { 100.0f, 300.0f, 1000.0f, 3500.0f, 9000.0f };
+    StringArray eqTypes;
+    for (auto* n : pvst::eq::kTypeNames) eqTypes.add (n);
+    for (int b = 1; b <= kEqBands; ++b)
+    {
+        const String P = "EQ " + String (b) + " ";
+        add<AudioParameterBool> (L, ParameterID { ids::eq (b, "on"), v7 }, P + "on", false);
+        add<AudioParameterChoice> (L, ParameterID { ids::eq (b, "type"), v7 }, P + "type", eqTypes, defEqType[b - 1]);
+        add<AudioParameterFloat> (L, ParameterID { ids::eq (b, "freq"), v7 }, P + "frequency", skewed (20.0f, 20000.0f, 1000.0f), defEqFreq[b - 1], fmt (0, "Hz"));
+        add<AudioParameterFloat> (L, ParameterID { ids::eq (b, "gain"), v7 }, P + "gain", NormalisableRange<float> (-24.0f, 24.0f, 0.0f), 0.0f, fmt (1, "dB"));
+        add<AudioParameterFloat> (L, ParameterID { ids::eq (b, "q"), v7 }, P + "Q", skewed (0.1f, 18.0f, 1.0f), 0.7071f, fmt (2, ""));
+        add<AudioParameterChoice> (L, ParameterID { ids::eq (b, "steep"), v7 }, P + "steepness", eqSteepNames(), 0);
+        add<AudioParameterFloat> (L, ParameterID { ids::eq (b, "kt"), v7 }, P + "key track", NormalisableRange<float> (0.0f, 100.0f, 0.0f), 0.0f, fmt (0, "%"));
     }
     return L;
 }

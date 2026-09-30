@@ -102,6 +102,46 @@ synth, or change." ~1.5 h of experimentation._
   - *Fit seed*: searches the seed whose stretched partials put the scale's notes into dissonance
     valleys (Sethares' "timbre follows tuning"). 12-EDO → 2.000, Bohlen-Pierce → 3.000.
 
+## v0.6.0 changes (user feedback batch 1 on build 14)
+- **Release**: the tail now fades all the way down (−100 dB) before the voice ends; no more cut.
+- **Note lighting**: every struck note lights for ≥ 140 ms, the nearest scale note lights in every key
+  mode (12-EDO / Seed-12 / Magnet too).
+- **Lock scale** (Calculator row, next to Reset edits): freezes the current scale. Change the seed,
+  partials or method: the locked notes stay (note edits still work on top), the dissonance curve keeps
+  following the new sound so you can see how the locked notes sit against it. The curve title shows
+  *SCALE LOCKED*. Clicking LOCKED asks "The scale will change" before unlocking (recalculates). The lock is
+  saved with the project and with presets (Tuning part). Dice / Init: Dice never touches the lock, Init unlocks.
+- **Base key** (Keys & pitch): the MIDI key that plays the scale's first note (default C4 = 60).
+  Not used in the 12-EDO key mode (normal tuning).
+- **Scale method: EDO and Seed-EDO** (+ *Steps* 1–120, scroll/drag the digits): N equal steps of 1200 c /
+  of the seed's "octave". The notes appear on the curve and in the Scale table like any other (switch single notes
+  off there). Strength = how deep a dissonance valley each step sits in.
+- **Modulator column** (right side): 8 modulators. Drag the numbered chip onto any number box (one modulator can
+  drive many boxes; several modulators can drive one). Linked boxes show the modulator numbers ("~1 3"), an orange
+  bar = where the modulation pushes them. Under each modulator its link chips: drag up/down = amount
+  (−100…+100 %), wheel = fine, right-/middle-click = remove. Right-click a linked box to remove a modulator from
+  it. Modulators can modulate modulators (rate/depth). Dice/Mutate/Clear links at the top.
+- **Hz or BPM in one control** (modulators, Shimmer, Wander, delay time): the Hz|BPM switch swaps the box for a
+  scrollable division: 1/64, 1/32, 1/16…32/16, 48/16, 64/16, each straight ("4/16"), triplet ("4/16t") or dotted
+  ("4/16."). Old division parameters are unused legacy; divisions restart at defaults in old projects.
+- **FX tab**: 12 rack slots (scroll the list), slot settings scroll too; **5-band EQ** on the right: band picker,
+  Type (Bell / Low shelf / High shelf / Low cut / High cut / Notch / Band-pass), Freq, Gain, Q, Steepness (cuts:
+  12–48 dB/oct), **Key track** (0 % = fixed, 100 % = follows the note; the band sits at its Freq on the base key).
+  Display: drag a node = frequency/gain (Q for cuts/notch/band-pass), wheel = Q, right-click/double-click =
+  on/off; it shows the curve for the note you hold. The EQ runs per voice before the FX rack.
+- **Filter & Noise tab removed** (per-voice filter + noise layer no longer driven; legacy parameters remain).
+- **Tooltips** on the unclear controls (hover 0.6 s): Life, Bend range, Formant, Shimmer, Chaos, Base key, …
+- Window: 1592 × 960.
+
+### What the unclear controls do
+- **Bend range**: how far the keyboard's pitch-bend wheel bends, in semitones (2 = ±2).
+- **Life**: loudness follows each scale note's strength (valley depth in the dissonance curve): weak notes are quieter,
+  deep ones full; 0 % = all equal. While holding keys and moving the seed, notes fade in/out as valleys appear/vanish.
+- **Shimmer**: each partial's loudness pulses on its own (own speed/phase): a sparkling movement. Not a reverb.
+- **Formant**: a fixed vowel-like bump (Hz, dB, width in octaves) on the partials' loudness: whichever partials land near
+  it get louder/quieter, whatever note you play.
+- **Chaos** (synth only): Wander = each partial drifts in pitch on its own random path; Scramble = partials swap loudness.
+
 ## Recipes to start from (for curating)
 1. **Consonant chord machine**: Method = Consonance · Key mode = Scale · Chord size 3, step 1 →
    every key plays three notes of a scale in which every pair fuses.

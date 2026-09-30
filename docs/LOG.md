@@ -222,3 +222,53 @@ params sitting after it → test crash (null param). Restored from git. Lesson a
   all work lived on `claude/amazing-planck-vf3au0`, `main` (where new sessions start) still had only
   the first upload (no CLAUDE.md either). User chose: agent updates `main` itself. Main fast-forwarded
   to this branch; CLAUDE.md now says to push to main after every task.
+
+## 2026-09-30 — session 2 — user feedback batch 1 on v0.5.0 → v0.6.0
+**User (first real try, verbatim-ish):** note lighting "not consistently showing, only when it feels
+like it"; wants to **lock the scale** even when the seed changes (+ a popup warning before unlocking,
+"the scale will change"); a **base key** (DAW's first MIDI note isn't the plugin's first when playing
+on anything but C); **modulators** as a separate column on the right, 8 of them, listed top to bottom;
+target chosen by **dragging the modulator onto a field**; one modulator → many fields; **Rate and
+Division united** (only one shows when switching Hz/BPM; scrollable division, each with three versions
+4/16, 4/16t, 4/16.). **FX**: more than 5 slots, scrollable rack (more FX feedback comes later).
+**Filter & Noise tab can go**; instead a small dynamic visual **5-band EQ in the FX tab** (EQ at the
+right, settings at the left: Q, steepness, band type; **key-trackable**). **Timbre**: same Rate/Division;
+unsure what Chaos / Formant are; explain Shimmer (small reverb?). **Envelope**: "release is still just a
+cutoff, it goes down and then instantly cuts at the selected length, I can even hear it clipping".
+**Keys & Pitch**: what are Bend range and Life for? "12-EDO and 12-SEED should also show up on the
+dissonance curve and the scale window, number scrollable 1–120 so it gives us a lot of notes."
+(Session started with an empty `main`; the agent was pointed at CLAUDE.md + docs/STATUS.md.)
+
+**Root causes found (measured, not guessed):**
+- *Release*: `--release` probe showed −78 dB RMS then an instant drop to −120 dB at the set time: the
+  voice was switched off when its envelope crossed 0.001 (−60 dB). Now it runs on to −100 dB (1e-5),
+  i.e. −112 dBFS at a −12 dB gain: inaudible. Test: last audible block before the end < −94 dBFS.
+- *Note lighting*: the UI only looked at the keys held at the instant of each 60 Hz refresh (notes
+  shorter than a refresh never showed) and in 12-EDO / Seed-12 / Magnet a key's pitch is rarely
+  within 15 c of a scale note (never lit). Fix: the engine latches every note-on into a ring
+  (`uiHitCents`/`uiHitSeq`), the UI keeps a struck note lit ≥ 140 ms and always lights the nearest note.
+
+**Done (v0.6.0):** see PLAYGROUND.md "v0.6.0 changes". Key design decisions:
+- Modulation = LINKS (mod, parameter id, amount) kept in `apvts.state` ("modLinks" property, NOT
+  parameters) and mirrored into a fixed lock-free table for the audio thread (`linkSlots`). Any float
+  parameter can be a target (`ScrubBox` is a `DragAndDropTarget`; the editor is the drop handler).
+  Modulators can modulate each other (one block delay). Old single `modNtarget` params are kept as
+  legacy and converted to links on load (`absorbLegacyTargets`).
+- New division parameters (`*beat`, 108 choices) instead of growing the old lists: old IDs keep their
+  meaning. Old `*Div` params are unused legacy.
+- The per-voice Filter + Noise were removed from the UI AND the processor stopped driving them (the
+  engine code is dormant); their parameters stay (legacy IDs).
+- EQ = Cytomic SVF sections (`shared/dsp/Eq.h`), per voice, before the FX rack; cut steepness = 1–4
+  Butterworth sections; key track per band. Display response uses the same maths.
+- Scale lock: snapshot of the raw scale (`lockedRaw`) saved in state ("lockedScale") and presets
+  (Tuning part); the live curve keeps updating. Unlock asks first (`AlertWindow::showAsync`).
+- EDO / Seed-EDO are calculator methods (notes placed at k·P/N, strength = valley depth like Imported).
+  `kEditableDegrees` 32 → 120, `kMaxRawNotes` 64 → 128 (≈ 240 note-edit parameters).
+- FX rack 5 → 12 slots; engine partial buses are now generic (only active buses are computed).
+**Worked first try:** everything compiled without changes after the big rewrite; 126/126 checks.
+**Failed / corrected on the way:** I first "migrated" the Scale-method parameter for old projects
+assuming normalised values — but the state XML stores PLAIN values (a choice is its index), so
+appending to the list needed no migration and my migration would have broken Imported. Removed;
+lesson added. The drop-target test caught nothing; the UI itself (drag with a real mouse) is untested
+headless — only the drop wiring and a screenshot were checked.
+

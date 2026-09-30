@@ -66,3 +66,7 @@ Format: **topic** — what happened → what to do instead. (date)
   tests. After any bulk edit of the parameter layout, grep that every expected ID still exists.
 - **Smoothed parameters need settle time in tests** (picks glides ~30 ms): render a warm-up block
   after setting params before measuring.
+
+## New sessions start from `main` (2026-09-30)
+Work pushed only to a `claude/*` branch is invisible to the next session (it checks out `main`, and
+without CLAUDE.md on main it doesn't even know to look at other branches). Always also push to `main`.

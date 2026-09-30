@@ -37,6 +37,9 @@ The user will not say "we're done". Any response might be the last one. Therefor
    - Add to `docs/LESSONS.md` if something failed or surprised us (so it's never repeated).
    - Update `docs/IDEAS.md` if ideas were added/tried/killed.
    - **Commit and push immediately.** Never end a response with uncommitted work.
+   - **Then also update `main`** (user decision 2026-09-30): new sessions start from `main`, so
+     work that only lives on a `claude/*` branch is invisible to them. After pushing your branch:
+     `git fetch origin main && git merge origin/main` (if needed), then `git push origin HEAD:main`.
 3. **Long tasks:** checkpoint mid-way. Commit partial progress with a `STATUS.md` note marked
    `IN PROGRESS` describing exactly what's half-done and what the next concrete step is.
 4. **Failures are data.** Log dead ends honestly (what was tried, symptom, suspected cause).

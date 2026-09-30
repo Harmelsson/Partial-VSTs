@@ -216,3 +216,9 @@ params sitting after it → test crash (null param). Restored from git. Lesson a
 - Tests: parse, reject garbage, BP import plays exactly (key 61 = degree 1), export round trip
   with a disabled note, .kbm, fit BP → 3.0000, 12-EDO → 2.0000, state restore. 86/86 pass.
 - CI run #14 green on Windows (build + all tests) → Release `build-14` = Seed v0.5.0.
+
+## 2026-09-30 — main was empty → new sessions saw no code
+- User opened a fresh session for feedback; its agent reported the plugin "isn't in the repo". Cause:
+  all work lived on `claude/amazing-planck-vf3au0`, `main` (where new sessions start) still had only
+  the first upload (no CLAUDE.md either). User chose: agent updates `main` itself. Main fast-forwarded
+  to this branch; CLAUDE.md now says to push to main after every task.

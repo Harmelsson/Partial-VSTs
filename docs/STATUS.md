@@ -36,5 +36,4 @@ https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-14
 - More synths using the shared calculator (plucks, drums, bells…) once Seed is curated.
 
 ## Open questions for the user
-- Merge policy: each session runs on its own `claude/*` branch. Merge to `main` after each session,
-  or let the agent merge? (Unmerged work may be invisible to the next session.)
+- (none open) Merge policy decided 2026-09-30: agent keeps `main` up to date after every task.

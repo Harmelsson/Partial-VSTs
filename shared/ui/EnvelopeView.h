@@ -13,13 +13,24 @@
 // Mouse: drag the hollow corners. Attack corner = left/right; decay corner = left/right (decay)
 // and up/down (sustain); release corner = left/right. Shift = finer. Middle-click = default.
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "ui/Controls.h"
 #include "ui/SquareLattice.h"
 
 namespace pvst
 {
-class EnvelopeView : public juce::Component
+class EnvelopeView : public juce::Component, public juce::DragAndDropTarget, public ParamBound
 {
 public:
+    bool usesParam (const juce::String& id) const override { return a.getParameterID() == id || d.getParameterID() == id || s.getParameterID() == id || r.getParameterID() == id; }
+    bool isInterestedInDragSource (const SourceDetails& dd) override { return dd.description.toString().startsWith ("mod:"); }
+    void itemDragEnter (const SourceDetails&) override { dropHover = true; repaint(); }
+    void itemDragExit (const SourceDetails&) override { dropHover = false; repaint(); }
+    void itemDropped (const SourceDetails& dd) override
+    {
+        dropHover = false; repaint();
+        chooseAndLink (*this, { { "Attack", &a }, { "Decay", &d }, { "Sustain", &s }, { "Release", &r } }, modOfDrag (dd));
+    }
+
     EnvelopeView (juce::RangedAudioParameter& attack, juce::RangedAudioParameter& decay,
                   juce::RangedAudioParameter& sustainPercent, juce::RangedAudioParameter& release)
         : a (attack), d (decay), s (sustainPercent), r (release) {}
@@ -28,6 +39,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
+        if (dropHover) { g.setColour (theme::modified); g.drawRect (getLocalBounds(), 2); }
         const auto data = dataArea();
         g.setColour (theme::grid());
         g.drawHorizontalLine ((int) data.getBottom(), data.getX(), data.getRight());
@@ -106,6 +118,7 @@ public:
     }
 
 private:
+    bool dropHover = false;
     struct Geo { float xA, xD, xS, xR; };
 
     juce::Rectangle<float> dataArea() const { return getLocalBounds().toFloat().reduced (8.0f, 8.0f).withTrimmedBottom (10.0f); }

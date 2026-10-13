@@ -4,7 +4,12 @@
 using namespace seed;
 
 SeedProcessor::SeedProcessor()
-    : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+    : AudioProcessor (BusesProperties()
+                          // Audio inputs are only there for the LFOs' audio trigger (v0.7). Both start disabled; a host
+                          // that supports it can switch them on (an instrument's "input" / external sidechain).
+                          .withInput ("Input", juce::AudioChannelSet::stereo(), false)
+                          .withInput ("Sidechain", juce::AudioChannelSet::stereo(), false)
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "SeedState", createParameterLayout())
 {
     for (int n = 1; n <= xen::kSeriesPartials; ++n)
@@ -36,6 +41,10 @@ SeedProcessor::SeedProcessor()
         mRate[(size_t) m - 1] = apvts.getParameter (ids::modRate (m));
         mDepth[(size_t) m - 1] = apvts.getParameter (ids::modDepth (m));
         mSync[(size_t) m - 1] = apvts.getParameter (ids::modSync (m));
+        mTrig[(size_t) m - 1] = apvts.getParameter (ids::modTrig (m));
+        mThr[(size_t) m - 1] = apvts.getParameter (ids::modThr (m));
+        mSrc[(size_t) m - 1] = apvts.getParameter (ids::modSrc (m));
+        mLoop[(size_t) m - 1] = apvts.getParameter (ids::modLoop (m));
         mBeat[(size_t) m - 1] = apvts.getParameter (ids::modBeat (m));
         if (m <= kLegacyMods) mTarget[(size_t) m - 1] = apvts.getParameter (ids::modTarget (m));
         mods[(size_t) m - 1].reset ((uint32_t) (m * 7919));
@@ -61,8 +70,19 @@ SeedProcessor::SeedProcessor()
     modOffset.assign (numParams, 0.0);
     uiModOffset = std::make_unique<std::atomic<float>[]> (numParams);
     for (size_t i = 0; i < numParams; ++i) uiModOffset[i].store (0.0f);
+    touchStamp.assign (numParams, 0u);
+    swing.assign (numParams, 0.5);
+    for (auto* prm : getParameters()) swing[(size_t) prm->getParameterIndex()] = prm->getNumSteps() < 100000 ? 1.0 : 0.5;
+    touchedPrev.reserve (kMaxLinks);
     for (auto& h : uiHeld) h.store (std::nanf (""));
     for (auto& h : uiHitCents) h.store (0.0f);
+    for (auto& h : uiModPhase) h.store (0.0f);
+    for (auto& h : uiModTrig) h.store (0u);
+    publishLfo();
+    {   // remembered window scale (a small settings file next to the presets)
+        const auto f = presetFolder().getParentDirectory().getChildFile ("seed-ui.txt");
+        if (f.existsAsFile()) uiScalePercent = juce::jlimit (25, 200, f.loadFileAsString().getIntValue());
+    }
 
     absorbLegacyTargets();
     pumpCalculator();
@@ -73,7 +93,10 @@ SeedProcessor::~SeedProcessor() { stopTimer(); }
 
 bool SeedProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    return layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo()) return false;
+    for (auto& in : layouts.inputBuses)
+        if (! in.isDisabled() && in != juce::AudioChannelSet::stereo() && in != juce::AudioChannelSet::mono()) return false;
+    return true;
 }
 
 void SeedProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -105,9 +128,17 @@ double SeedProcessor::eff (juce::RangedAudioParameter* p) const
     return p->convertFrom0to1 ((float) norm);
 }
 
+double SeedProcessor::effUI (juce::RangedAudioParameter* p) const
+{
+    const double off = (double) uiModOffset[(size_t) p->getParameterIndex()].load (std::memory_order_relaxed);
+    return p->convertFrom0to1 ((float) juce::jlimit (0.0, 1.0, (double) p->getValue() + off));
+}
+
 /// Modulators -> per-parameter offsets (normalised units). Depth 100 % swings a full half-range each
 /// way; each link's amount scales that. A modulator's own rate / depth can be modulated too, using the
 /// other modulators' values from the previous block (so there is no ordering problem).
+/// v0.7: a modulator can also be RESTARTED here: by a MIDI note-on in this block, or when the level of
+/// its audio source rises through its threshold (with 6 dB of hysteresis so it re-arms cleanly).
 void SeedProcessor::computeModOffsets (double blockSeconds)
 {
     auto accumulate = [this] (const std::array<double, kNumMods>& value, const std::array<double, kNumMods>& depth) {
@@ -116,26 +147,56 @@ void SeedProcessor::computeModOffsets (double blockSeconds)
         {
             const int pi = sl.param.load (std::memory_order_relaxed), m = sl.mod.load (std::memory_order_relaxed);
             if (pi < 0 || m < 1 || m > kNumMods) continue;
-            modOffset[(size_t) pi] += 0.5 * depth[(size_t) m - 1] * (double) sl.amount.load (std::memory_order_relaxed) * 0.01 * value[(size_t) m - 1];
+            // Continuous parameters swing +-half their range at 100 % depth; switches / choices / integers use the full
+            // range (a switch only flips if the modulation can cross the middle from either side).
+            modOffset[(size_t) pi] += swing[(size_t) pi] * depth[(size_t) m - 1] * (double) sl.amount.load (std::memory_order_relaxed) * 0.01 * value[(size_t) m - 1];
         }
     };
+    {   // drawn LFO curves: pick up the latest ones from the message thread
+        const juce::SpinLock::ScopedTryLockType tl (lfoLock);
+        if (tl.isLocked() && lfoVersion != lfoAudioVersion) { lfoAudio = lfoShared; lfoAudioVersion = lfoVersion; }
+    }
     std::array<double, kNumMods> depth {}, value {};
     for (int m = 0; m < kNumMods; ++m) depth[(size_t) m] = mDepth[(size_t) m]->convertFrom0to1 (mDepth[(size_t) m]->getValue()) / 100.0;
     accumulate (lastModValue, depth);
     for (int m = 0; m < kNumMods; ++m)
     {
         const auto um = (size_t) m;
-        const int shape = (int) mShape[um]->convertFrom0to1 (mShape[um]->getValue());
+        const int shape = (int) std::lround (eff (mShape[um]));
+        // Trigger: Never = free-running, MIDI = every note-on, Audio = level crossing the threshold.
+        const int trig = (int) std::lround (eff (mTrig[um]));
+        bool restart = trig == 1 && midiNoteOnInBlock;
+        if (trig == 2)
+        {
+            const int src = (int) std::lround (eff (mSrc[um]));
+            const float peak = src == 0 ? levelIn : src == 2 ? levelSc : levelOut.load (std::memory_order_relaxed);
+            const double db = 20.0 * std::log10 (std::max (1e-9, (double) peak)), thr = eff (mThr[um]);
+            if (trigArmed[um] && db > thr) { restart = true; trigArmed[um] = false; }
+            else if (db < thr - 6.0) trigArmed[um] = true;
+        }
+        if (restart) { mods[um].restart(); uiModTrig[um].fetch_add (1u, std::memory_order_relaxed); }
         // Hz, or synced to the host tempo with a division (straight / triplet / dotted).
         const double rate = eff (mSync[um]) > 0.5 ? (bpm / 60.0) / beatLength ((int) std::lround (eff (mBeat[um]))) : eff (mRate[um]);
         depth[um] = eff (mDepth[um]) / 100.0;
-        value[um] = mods[um].advance (shape, rate, blockSeconds);
+        value[um] = mods[um].advance (shape, rate, blockSeconds, &lfoAudio[um], eff (mLoop[um]) > 0.5);
         uiModValue[um].store ((float) value[um], std::memory_order_relaxed);
+        uiModPhase[um].store ((float) mods[um].getPhase(), std::memory_order_relaxed);
     }
     lastModValue = value;
     accumulate (value, depth);
-    for (auto& sl : linkSlots) // the UI's view of the same offsets
-        if (const int pi = sl.param.load (std::memory_order_relaxed); pi >= 0) uiModOffset[(size_t) pi].store ((float) modOffset[(size_t) pi], std::memory_order_relaxed);
+    // The UI's view of the same offsets. Parameters that were linked in the previous block but are not
+    // any more get an explicit 0, so the message thread never reads a stale offset.
+    ++touchBlock;
+    std::vector<int>& prev = touchedPrev;
+    for (auto& sl : linkSlots)
+        if (const int pi = sl.param.load (std::memory_order_relaxed); pi >= 0 && touchStamp[(size_t) pi] != touchBlock)
+        {
+            touchStamp[(size_t) pi] = touchBlock;
+            uiModOffset[(size_t) pi].store ((float) modOffset[(size_t) pi], std::memory_order_relaxed);
+        }
+    for (int pi : prev) if (touchStamp[(size_t) pi] != touchBlock) uiModOffset[(size_t) pi].store (0.0f, std::memory_order_relaxed);
+    prev.clear();
+    for (auto& sl : linkSlots) if (const int pi = sl.param.load (std::memory_order_relaxed); pi >= 0) prev.push_back (pi);
 }
 
 void SeedProcessor::buildEngineParams (double blockSeconds)
@@ -149,6 +210,11 @@ void SeedProcessor::buildEngineParams (double blockSeconds)
     ep.fundamentalHz = E (pFund);
     ep.rolloff = E (pRolloff);
     ep.partials = juce::jlimit (1, xen::kSeriesPartials, (int) std::lround (V (ids::partials)));
+    // Lock partials: the series keeps its locked stretch / rolloff / count; the seed only sets the period.
+    const bool pLock = partialsLocked() && lockedPValid.load();
+    ep.partialSeed = pLock ? (double) lockedPSeed.load() : ep.seed;
+    ep.partialRolloff = pLock ? (double) lockedPRolloff.load() : ep.rolloff;
+    if (pLock) ep.partials = juce::jlimit (1, xen::kSeriesPartials, lockedPCount.load());
     effSeed.store ((float) ep.seed); effFund.store ((float) ep.fundamentalHz); effRolloff.store ((float) ep.rolloff);
     effMinDip.store ((float) E (pMinDip)); effTol.store ((float) E (pTol));
     ep.edits = partialEditsFromParams();
@@ -156,7 +222,9 @@ void SeedProcessor::buildEngineParams (double blockSeconds)
     // Synth.
     ep.attackMs = V (ids::attack); ep.decayMs = V (ids::decay); ep.sustain = V (ids::sustain) / 100.0;
     ep.releaseMs = V (ids::release); ep.velocitySens = V (ids::velocity) / 100.0; ep.gainDb = V (ids::gain);
-    ep.keyMode = (int) std::lround (V (ids::keyMode));
+    // v0.7: the keyboard ALWAYS plays the scale (the Scale method decides what that is: Dissonance, EDO, Seed-EDO...).
+    // The old Key mode / Magnet controls were removed from the UI; their parameters stay as legacy.
+    ep.keyMode = KeysScale;
     ep.baseKey = juce::jlimit (0, 127, (int) std::lround (V (ids::baseKey)));
     ep.magnet = V (ids::magnet) / 100.0; ep.life = V (ids::life) / 100.0; ep.glideMs = V (ids::glide);
     ep.pitchCents = V (ids::pitch); ep.fshiftHz = V (ids::fshift);
@@ -195,19 +263,20 @@ void SeedProcessor::buildEngineParams (double blockSeconds)
 xen::PartialEdits SeedProcessor::partialEditsFromParams() const
 {
     xen::PartialEdits e;
-    auto val = [] (juce::RangedAudioParameter* p) { return (double) p->convertFrom0to1 (p->getValue()); };
+    // effUI: any of these can be modulated too (drag a modulator onto a partial in the plot or a tick box).
+    auto val = [this] (juce::RangedAudioParameter* p) { return effUI (p); };
     for (int i = 0; i < xen::kSeriesPartials; ++i)
     {
         e.levelDb[(size_t) i] = val (pLvl[(size_t) i]);
         e.posCents[(size_t) i] = pPos[(size_t) i] ? val (pPos[(size_t) i]) : 0.0;
-        e.inScale[(size_t) i] = pScl[(size_t) i] == nullptr || pScl[(size_t) i]->getValue() > 0.5f;
+        e.inScale[(size_t) i] = pScl[(size_t) i] == nullptr || val (pScl[(size_t) i]) > 0.5;
     }
     for (int k = 0; k < xen::kCustomPartials; ++k)
     {
-        e.customOn[(size_t) k] = cpOn[(size_t) k]->getValue() > 0.5f;
+        e.customOn[(size_t) k] = val (cpOn[(size_t) k]) > 0.5;
         e.customCents[(size_t) k] = val (cpC[(size_t) k]);
         e.customLevelDb[(size_t) k] = val (cpL[(size_t) k]);
-        e.customInScale[(size_t) k] = cpScl[(size_t) k]->getValue() > 0.5f;
+        e.customInScale[(size_t) k] = val (cpScl[(size_t) k]) > 0.5;
     }
     return e;
 }
@@ -217,13 +286,13 @@ xen::NoteEdits SeedProcessor::noteEditsFromParams() const
     xen::NoteEdits e;
     for (int d = 0; d < xen::kEditableDegrees; ++d)
     {
-        e.on[(size_t) d] = nOn[(size_t) d]->getValue() > 0.5f;
-        e.offset[(size_t) d] = nOff[(size_t) d]->convertFrom0to1 (nOff[(size_t) d]->getValue());
+        e.on[(size_t) d] = effUI (nOn[(size_t) d]) > 0.5;
+        e.offset[(size_t) d] = effUI (nOff[(size_t) d]);
     }
     for (int k = 0; k < xen::kCustomNotes; ++k)
     {
-        e.customOn[(size_t) k] = cnOn[(size_t) k]->getValue() > 0.5f;
-        e.customCents[(size_t) k] = cnC[(size_t) k]->convertFrom0to1 (cnC[(size_t) k]->getValue());
+        e.customOn[(size_t) k] = effUI (cnOn[(size_t) k]) > 0.5;
+        e.customCents[(size_t) k] = effUI (cnC[(size_t) k]);
     }
     return e;
 }
@@ -281,8 +350,8 @@ void SeedProcessor::handleMidi (const juce::MidiMessage& m)
 
 void SeedProcessor::updateDrone()
 {
-    const bool on = P (ids::drone)->getValue() > 0.5f;
-    const int key = (int) std::lround (P (ids::droneNote)->convertFrom0to1 (P (ids::droneNote)->getValue()));
+    const bool on = eff (P (ids::drone)) > 0.5;
+    const int key = (int) std::lround (eff (P (ids::droneNote)));
     if (on && droneSounding != key)
     {
         if (droneSounding >= 0) engine.noteOff (droneSounding);
@@ -306,6 +375,13 @@ void SeedProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
         if (auto pos = ph->getPosition())
             if (auto hostBpm = pos->getBpm()) bpm = juce::jlimit (20.0, 999.0, *hostBpm);
 
+    // Audio levels for the LFOs' audio trigger: this block's input / sidechain buses (read BEFORE we write the
+    // output into the same buffer), and the previous block's output.
+    levelIn = levelSc = 0.0f;
+    if (getBusCount (true) > 0) { auto in = getBusBuffer (buffer, true, 0); if (in.getNumChannels() > 0) levelIn = in.getMagnitude (0, n); }
+    if (getBusCount (true) > 1) { auto sc = getBusBuffer (buffer, true, 1); if (sc.getNumChannels() > 0) levelSc = sc.getMagnitude (0, n); }
+    midiNoteOnInBlock = false;
+    for (const auto meta : midi) if (meta.getMessage().isNoteOn()) { midiNoteOnInBlock = true; break; }
     buildEngineParams (n / sampleRateHz);
     engine.setParams (ep);
     updateScaleOnAudioThread();
@@ -335,9 +411,14 @@ void SeedProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
     processRack (n);
 
+    float outPeak = 0.0f;
+    for (int i = 0; i < n; ++i) outPeak = std::max (outPeak, std::max (std::abs (dryL[(size_t) i]), std::abs (dryR[(size_t) i])));
+    levelOut.store (outPeak, std::memory_order_relaxed);
+    const int outCh = std::min (buffer.getNumChannels(), 2);
     buffer.copyFrom (0, 0, dryL.data(), n);
-    if (buffer.getNumChannels() > 1) buffer.copyFrom (1, 0, dryR.data(), n);
-    safety.process (buffer); // always last, never bypassed
+    if (outCh > 1) buffer.copyFrom (1, 0, dryR.data(), n);
+    juce::AudioBuffer<float> outView (buffer.getArrayOfWritePointers(), outCh, n); // the safety stage only sees the output channels
+    safety.process (outView); // always last, never bypassed
     uiActiveVoices.store (engine.activeVoiceCount(), std::memory_order_relaxed);
     std::array<float, kMaxVoices> held {};
     const int nh = engine.heldNoteCents (held.data(), kMaxVoices);
@@ -361,7 +442,7 @@ void SeedProcessor::publishHits()
 // ================================================================================================
 xen::CalculatorSettings SeedProcessor::currentCalculatorSettings() const
 {
-    auto V = [this] (const char* id) { auto* p = P (id); return (double) p->convertFrom0to1 (p->getValue()); };
+    auto V = [this] (const char* id) { return effUI (P (id)); }; // modulated, like the audio thread sees it
     xen::CalculatorSettings c;
     // Use the audio thread's modulated values when audio runs; the plain values otherwise.
     c.seed = effSeed.load() > 0.0f ? effSeed.load() : V (ids::seed);
@@ -377,6 +458,11 @@ xen::CalculatorSettings SeedProcessor::currentCalculatorSettings() const
     c.toleranceCents = effTol.load() >= 0.0f ? effTol.load() : V (ids::tolerance);
     c.minShared = (int) std::lround (V (ids::minShared));
     c.edits = partialEditsFromParams();
+    if (partialsLocked() && lockedPValid.load())
+    {
+        c.partialsLocked = true;
+        c.lockedSeed = (double) lockedPSeed.load(); c.lockedRolloff = (double) lockedPRolloff.load(); c.lockedCount = lockedPCount.load();
+    }
     return c;
 }
 
@@ -462,6 +548,47 @@ void SeedProcessor::pumpCalculator()
         publishedLocked = locked;
         publishScale();
     }
+    // Same for the partials lock (host automation / preset load can flip the parameter).
+    const bool pLocked = partialsLocked();
+    if (pLocked && ! lockedPValid.load() && calcSeen > 0)
+    {
+        const auto cs = currentCalculatorSettings();
+        lockedPSeed = (float) cs.seed; lockedPRolloff = (float) cs.rolloff; lockedPCount = cs.partials;
+        lockedPValid = true;
+        apvts.state.setProperty ("lockedPartials", lockedPartialsText(), nullptr);
+    }
+    else if (! pLocked && lockedPValid.load())
+    {
+        lockedPValid = false;
+        apvts.state.setProperty ("lockedPartials", juce::String(), nullptr);
+    }
+}
+
+juce::String SeedProcessor::lockedPartialsText() const
+{
+    return juce::String ((double) lockedPSeed.load(), 9) + "|" + juce::String ((double) lockedPRolloff.load(), 9) + "|" + juce::String (lockedPCount.load());
+}
+
+void SeedProcessor::setLockedPartialsFromText (const juce::String& text)
+{
+    const auto f = juce::StringArray::fromTokens (text, "|", "");
+    const bool ok = f.size() == 3 && f[0].getDoubleValue() > 0.0;
+    if (ok) { lockedPSeed = (float) f[0].getDoubleValue(); lockedPRolloff = (float) f[1].getDoubleValue(); lockedPCount = juce::jlimit (1, xen::kSeriesPartials, f[2].getIntValue()); }
+    lockedPValid = ok;
+    apvts.state.setProperty ("lockedPartials", ok ? text : juce::String(), nullptr);
+}
+
+void SeedProcessor::setPartialsLocked (bool lock)
+{
+    if (lock)
+    {
+        const auto cs = currentCalculatorSettings(); // the effective (modulated) values right now
+        lockedPSeed = (float) cs.partialSeed(); lockedPRolloff = (float) cs.partialRolloff(); lockedPCount = cs.partialCount();
+        lockedPValid = true;
+        apvts.state.setProperty ("lockedPartials", lockedPartialsText(), nullptr);
+    }
+    else setLockedPartialsFromText ({});
+    P (ids::partialsLock)->setValueNotifyingHost (lock ? 1.0f : 0.0f);
 }
 
 xen::FinalScale SeedProcessor::finalScale() const
@@ -585,6 +712,8 @@ bool SeedProcessor::savePreset (const juce::String& name)
     root.setAttribute ("version", kVersion);
     if (importedSclText.isNotEmpty()) root.setAttribute ("importedScl", importedSclText); // part of the Tuning
     if (lockedRaw.valid && scaleLocked()) root.setAttribute ("lockedScale", rawScaleToText (lockedRaw)); // part of the Tuning
+    if (lockedPValid.load() && partialsLocked()) root.setAttribute ("lockedPartials", lockedPartialsText()); // part of the Tuning
+    for (int m = 1; m <= kNumMods; ++m) root.setAttribute ("lfo" + juce::String (m), juce::String (lfoUI[(size_t) m - 1].toText())); // drawn LFO curves (Sound)
     for (auto& l : links)
     {
         auto* e = root.createNewChildElement ("LINK");
@@ -626,6 +755,13 @@ bool SeedProcessor::loadPreset (const juce::File& file, Scope scope)
     {
         setImportedFromText (xml->getStringAttribute ("importedScl"));
         setLockedFromText (xml->getStringAttribute ("lockedScale"));
+        setLockedPartialsFromText (xml->getStringAttribute ("lockedPartials"));
+    }
+    if (scope != Scope::Tuning)
+    {
+        for (int m = 1; m <= kNumMods; ++m)
+            if (const auto t = xml->getStringAttribute ("lfo" + juce::String (m)); t.isNotEmpty()) lfoUI[(size_t) m - 1].fromText (t.toStdString());
+        writeLfoState(); publishLfo();
     }
     // Modulation links follow the same split: links aimed at tuning values belong to the Tuning part.
     std::vector<ModLink> kept;
@@ -672,7 +808,7 @@ void SeedProcessor::randomizeOne (juce::RangedAudioParameter& rp, double amount,
 static bool neverRandomised (const juce::String& id)
 {
     static const juce::StringArray never { ids::gain, ids::drone, ids::droneNote, ids::keysFollow, ids::bendRange,
-                                           ids::velocity, ids::fundamental, ids::scaleLock, ids::baseKey };
+                                           ids::velocity, ids::fundamental, ids::scaleLock, ids::partialsLock, ids::baseKey };
     return never.contains (id);
 }
 
@@ -737,6 +873,9 @@ void SeedProcessor::initAll()
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p)) rp->setValueNotifyingHost (rp->getDefaultValue());
     links.clear();
     setLockedFromText ({});
+    setLockedPartialsFromText ({});
+    for (auto& l : lfoUI) l.preset (0);
+    writeLfoState(); publishLfo();
     commitLinks();
     publishScale();
     currentPresetName = {};
@@ -866,7 +1005,7 @@ void SeedProcessor::loadLinksFromText (const juce::String& text)
         const auto f = juce::StringArray::fromTokens (part, "|", "");
         if (f.size() != 3) continue;
         const int m = f[0].getIntValue();
-        if (m < 1 || m > kNumMods || dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter (f[1])) == nullptr) continue;
+        if (m < 1 || m > kNumMods || ! isModulatable (f[1])) continue;
         links.push_back ({ m, f[1], f[2].getFloatValue() });
     }
     commitLinks();
@@ -892,10 +1031,21 @@ void SeedProcessor::commitLinks()
 
 std::vector<SeedProcessor::ModLink> SeedProcessor::modLinks() const { return links; }
 
+/// Any parameter you can edit with the mouse can be modulated: floats sweep, ints / choices step through
+/// their values, switches flip when the modulation crosses the middle. Not the two locks (they carry a
+/// snapshot), nor the legacy single-target parameters.
+bool SeedProcessor::isModulatable (const juce::String& id) const
+{
+    if (apvts.getParameter (id) == nullptr) return false;
+    if (id == ids::scaleLock || id == ids::partialsLock || id == ids::keysFollow) return false;
+    if (id.startsWith ("mod") && id.endsWith ("target")) return false;
+    return true;
+}
+
 bool SeedProcessor::addModLink (int mod, const juce::String& paramId, float amountPercent)
 {
     if (mod < 1 || mod > kNumMods || (int) links.size() >= kMaxLinks) return false;
-    if (dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter (paramId)) == nullptr) return false;
+    if (! isModulatable (paramId)) return false;
     for (auto& l : links) if (l.mod == mod && l.paramId == paramId) return false;
     links.push_back ({ mod, paramId, juce::jlimit (-100.0f, 100.0f, amountPercent) });
     commitLinks();
@@ -970,11 +1120,67 @@ void SeedProcessor::setStateInformation (const void* data, int sizeInBytes)
             currentPresetName = apvts.state.getProperty ("presetName").toString();
             setImportedFromText (apvts.state.getProperty ("importedScl").toString());
             setLockedFromText (apvts.state.getProperty ("lockedScale").toString());
+            setLockedPartialsFromText (apvts.state.getProperty ("lockedPartials").toString());
+            loadLfoState (apvts.state.getProperty ("lfoShapes").toString());
             loadLinksFromText (apvts.state.getProperty ("modLinks").toString());
             absorbLegacyTargets();
             publishedLocked = false;
             publishScale();
         }
+}
+
+// ================================================================================================
+// Drawn LFO shapes + window scale (v0.7)
+// ================================================================================================
+void SeedProcessor::publishLfo()
+{
+    const juce::SpinLock::ScopedLockType sl (lfoLock);
+    lfoShared = lfoUI;
+    ++lfoVersion;
+}
+
+void SeedProcessor::writeLfoState()
+{
+    juce::StringArray parts;
+    for (auto& l : lfoUI) parts.add (juce::String (l.toText()));
+    apvts.state.setProperty ("lfoShapes", parts.joinIntoString ("|"), nullptr);
+}
+
+void SeedProcessor::loadLfoState (const juce::String& text)
+{
+    const auto parts = juce::StringArray::fromTokens (text, "|", "");
+    for (int m = 0; m < kNumMods; ++m)
+    {
+        lfoUI[(size_t) m].preset (0);
+        if (m < parts.size()) lfoUI[(size_t) m].fromText (parts[m].toStdString());
+    }
+    publishLfo();
+}
+
+void SeedProcessor::setLfoShape (int mod, const pvst::LfoShape& shape)
+{
+    if (mod < 1 || mod > kNumMods) return;
+    lfoUI[(size_t) mod - 1] = shape;
+    lfoUI[(size_t) mod - 1].sanitize();
+    writeLfoState();
+    publishLfo();
+    auto* sp = mShape[(size_t) mod - 1];
+    if ((int) std::lround (sp->convertFrom0to1 (sp->getValue())) != kShapeDrawn) sp->setValueNotifyingHost (sp->convertTo0to1 ((float) kShapeDrawn));
+}
+
+void SeedProcessor::applyLfoPreset (int mod, int preset)
+{
+    pvst::LfoShape s;
+    s.preset (preset);
+    setLfoShape (mod, s);
+}
+
+void SeedProcessor::setUiScale (int percent)
+{
+    uiScalePercent = juce::jlimit (25, 200, percent);
+    const auto f = presetFolder().getParentDirectory().getChildFile ("seed-ui.txt");
+    f.getParentDirectory().createDirectory();
+    f.replaceWithText (juce::String (uiScalePercent));
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new SeedProcessor(); }

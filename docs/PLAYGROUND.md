@@ -131,7 +131,7 @@ synth, or change." ~1.5 h of experimentation._
   on/off; it shows the curve for the note you hold. The EQ runs per voice before the FX rack.
 - **Filter & Noise tab removed** (per-voice filter + noise layer no longer driven; legacy parameters remain).
 - **Tooltips** on the unclear controls (hover 0.6 s): Life, Bend range, Formant, Shimmer, Chaos, Base key, …
-- Window: 1592 × 960.
+- Window: 1592 × 960 (scalable since v0.7).
 
 ### What the unclear controls do
 - **Bend range**: how far the keyboard's pitch-bend wheel bends, in semitones (2 = ±2).
@@ -141,6 +141,36 @@ synth, or change." ~1.5 h of experimentation._
 - **Formant**: a fixed vowel-like bump (Hz, dB, width in octaves) on the partials' loudness: whichever partials land near
   it get louder/quieter, whatever note you play.
 - **Chaos** (synth only): Wander = each partial drifts in pitch on its own random path; Scramble = partials swap loudness.
+
+## v0.7.0 changes (user feedback batch 2 on build 16)
+- **Modulate anything**: every control you can edit with the mouse takes a dragged modulator chip: number boxes
+  (floats AND integers), switches, choices (Scale method…), the Hz|BPM switch and division, picks, envelope (asks
+  which of A/D/S/R), EQ nodes (asks which setting), scale notes on the curve (position or on/off), the Scale table's
+  on/off squares, partials in the plot (loudness or position), the Partials table ticks, FX rack rows (on-square or asks).
+  Floats swing ±half their range at 100 % depth, switches/choices/integers use the full range (a switch only flips if it
+  can cross the middle). Calculator values are modulated as the synth hears them. The two lock switches can't be modulated.
+- **Key mode + Magnet removed from the UI.** The keyboard always plays the scale: choose the **Scale method**.
+  EDO 12 (Fundamental C4, Base key C4) = normal piano; Seed-EDO 12 = the old Seed-12; Dissonance / Consonance /
+  Imported / EDO any N. The curve and Scale table always show exactly the notes the keys play. (Legacy parameters stay.)
+- **LFO editor** (top of the modulator column, for the selected modulator; click a row or its number): the curve is
+  drawn like PhasePlant/Serum. Drag squares = points, double-click = add, right-click = delete, drag the small dots =
+  bend a segment, **Shift+drag = snap to the grid** (X / Y division buttons), Presets menu (Sine, Triangle, Saw up/down,
+  Square, Pulse, Ramp, Steps, Bounce, Invert, Reverse). The built-in Sine/Triangle/Saw/Square are shown and become drawn
+  curves when touched; S&H / Smooth rnd / Drift are random and can't be drawn. A moving line shows the LFO position.
+  Rows show a tiny picture of each shape.
+- **LFO triggers** (per modulator): **Never** (free-running), **MIDI** (restart on every note-on), **Audio** (restart
+  when the level of the **Input**, **Output** or external **Sidechain** rises through a **Threshold** in dB; it re-arms
+  6 dB lower). **Loop / One-shot** (one cycle after each trigger, then hold). Input/Sidechain are optional plugin buses
+  (off by default) — they only carry sound if the host connects them (not verified in FL).
+- **Click a link chip** (e.g. "FX 4 squash makeup +100%"): the plugin opens that control's tab (FX slot / EQ band too),
+  scrolls to it and lights it with an orange glow for a few seconds. Dragging the chip still changes the amount.
+- **Lock partials** (calculator row, next to Lock scale): freezes the seed stretch, rolloff and count of the partial
+  series. The seed then only sets the period / scale; hand edits still apply. Warning popup before unlocking. Saved with
+  projects and presets (Tuning part), Dice never touches it. The partials plot shows PARTIALS LOCKED.
+- **Window scale 25–200 %** (header, under the version): − / + / click for a list. Remembered between sessions
+  (`Documents/Partial-VSTs/seed-ui.txt`). Uses JUCE's editor scale factor.
+- **Keyboard focus (Windows)**: after a click inside the plugin the focus is handed back to FL's window (what clicking
+  its border does), so FL's typing keyboard plays right away. Not done while typing into a text box or with a menu open.
 
 ## Recipes to start from (for curating)
 1. **Consonant chord machine**: Method = Consonance · Key mode = Scale · Chord size 3, step 1 →

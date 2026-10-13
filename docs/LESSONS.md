@@ -93,3 +93,18 @@ without CLAUDE.md on main it doesn't even know to look at other branches). Alway
 - **Linux container needs the JUCE dev packages** again in a fresh session:
   `apt-get install -y libasound2-dev libxrandr-dev libxinerama-dev libxcursor-dev libgl-dev libfontconfig1-dev libxcomposite-dev xvfb libxext-dev`.
 
+## Buses, focus, scaling (2026-10-13)
+- **JUCE process buffer layout**: input buses are laid out one after another from channel 0, output buses too, and
+  both share those channels (in-place). With the main input disabled, an aux (sidechain) INPUT is channels 0-1 — the
+  same ones the output goes to. Read inputs before writing outputs. Aux buses added with `withInput(..., false)` start disabled.
+- **Discrete parameters need the full range to be modulated**: ±half range from 0 never crosses 0.5 of a switch.
+  `getNumSteps() < 100000` tells discrete from continuous.
+- **Never trust the old key-mode tests after removing a mode**: with the scale not yet calculated the engine falls back
+  to a stretched 12-key layout, which made tests pass/fail by timing. Tests that want "normal keys" must set the
+  EDO-12 method and wait for the calculator (`Rig` does this now).
+- **Ambiguous constructor**: passing `*this` to a mixin base taking `Component&` while it also has a copy constructor
+  is "ambiguous" — take a `Component*` instead.
+- **Windows keyboard focus in hosts**: a click inside a JUCE plugin window leaves Win32 focus on the plugin's own HWND,
+  so the host's typing-keyboard shortcuts stop working. Hand focus back with `SetFocus(GetAncestor(h, GA_ROOT))` after
+  the click (not while a TextEditor / popup / modal is active). Cannot be tested on Linux.
+

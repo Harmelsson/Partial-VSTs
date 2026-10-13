@@ -12,15 +12,17 @@
 /// Picks as a scrollable morph between pick rules (user v0.4: "scrolling in between Odd and Even
 /// would sound really cool"). Drag up/down (40 px per rule, Shift = slower), wheel = 0.1 steps,
 /// middle-click = default. Shows e.g. "Odd 50% / Even 50%".
-class PicksBox : public juce::Component, public juce::SettableTooltipClient
+class PicksBox : public juce::Component, public juce::SettableTooltipClient, public pvst::ModAware, public pvst::ParamBound
 {
 public:
     PicksBox (juce::RangedAudioParameter& p, juce::String l)
-        : param (p), label (std::move (l)), attachment (p, [this] (float) { repaint(); }, nullptr)
+        : pvst::ModAware (this), param (p), label (std::move (l)), attachment (p, [this] (float) { repaint(); }, nullptr)
     {
         attachment.sendInitialUpdate();
         setRepaintsOnMouseActivity (true);
     }
+    bool usesParam (const juce::String& id) const override { return param.getParameterID() == id; }
+    juce::RangedAudioParameter* modParamAt (juce::Point<int>) override { return &param; }
     void paint (juce::Graphics& g) override
     {
         namespace th = pvst::theme;
@@ -37,6 +39,7 @@ public:
         g.setColour (isMouseOverOrDragging() ? th::mix (0.45f) : th::frame()); g.drawRect (b, 1);
         g.setColour (th::text()); g.setFont (th::sans (13.0f));
         g.drawFittedText (param.getCurrentValueAsText(), b.reduced (6, 0), juce::Justification::centredLeft, 1, 0.8f);
+        paintModOverlay (g, b);
     }
     void mouseDown (const juce::MouseEvent& e) override
     {
@@ -70,7 +73,7 @@ private:
     float startY = 0.0f;
 };
 
-class FxRackView : public juce::Component
+class FxRackView : public juce::Component, public juce::DragAndDropTarget
 {
 public:
     explicit FxRackView (SeedProcessor& p) : proc (p)
@@ -124,7 +127,7 @@ public:
             const bool on = param (sl, "on").getValue() > 0.5f;
             const bool sel = sl == selected;
             g.setColour (sel ? th::selected() : th::boxFill()); g.fillRect (row);
-            g.setColour (sel ? th::mix (0.5f) : th::frame()); g.drawRect (row, 1);
+            g.setColour (sl == dropRow ? th::modified : sel ? th::mix (0.5f) : th::frame()); g.drawRect (row, sl == dropRow ? 2 : 1);
             auto r = row.reduced (6, 0);
             // Arrows (swap with neighbour).
             auto up = r.removeFromLeft (14).withSizeKeepingCentre (10, 8).toFloat().translated (0, -5);
@@ -203,6 +206,41 @@ public:
     {
         viewport.setBounds (getLocalBounds().withTrimmedLeft (kListW + 10));
         layoutDetail();
+    }
+
+    /// Selects a slot (used when a modulator link is clicked: show the control it drives).
+    void selectSlot (int sl)
+    {
+        sl = juce::jlimit (1, seed::kNumFx, sl);
+        if (sl != selected) { selected = sl; rebuildDetail(); }
+        const int rowTop = (sl - 1) * kRowH;
+        if (rowTop < scroll || rowTop + kRowH > scroll + listViewport.getHeight()) scroll = juce::jlimit (0, maxScroll, rowTop - kRowH);
+        repaint();
+    }
+    int selectedSlot() const { return selected; }
+
+    // A modulator chip dropped on a rack row: the on/off square -> On, elsewhere -> asks (Mix / Pan / Width / On / Type).
+    int rowAtPoint (juce::Point<int> p) const
+    {
+        if (! listViewport.contains (p)) return -1;
+        for (int i = 0; i < (int) rows.size(); ++i) if (rows[(size_t) i].contains (p)) return i + 1;
+        return -1;
+    }
+    bool isInterestedInDragSource (const SourceDetails& d) override { return d.description.toString().startsWith ("mod:") && rowAtPoint (d.localPosition) > 0; }
+    void itemDragEnter (const SourceDetails& d) override { dropRow = rowAtPoint (d.localPosition); repaint(); }
+    void itemDragMove (const SourceDetails& d) override { const int r = rowAtPoint (d.localPosition); if (r != dropRow) { dropRow = r; repaint(); } }
+    void itemDragExit (const SourceDetails&) override { dropRow = -1; repaint(); }
+    void itemDropped (const SourceDetails& d) override
+    {
+        const int sl = rowAtPoint (d.localPosition);
+        dropRow = -1; repaint();
+        if (sl < 1) return;
+        const int mod = pvst::modOfDrag (d);
+        if (d.localPosition.x - rows[(size_t) sl - 1].getX() >= 40 && d.localPosition.x - rows[(size_t) sl - 1].getX() < 62)
+        { if (auto* h = pvst::findModHandler (this)) h->modDroppedOn (param (sl, "on"), mod); return; }
+        pvst::chooseAndLink (*this, { { "Slot " + juce::String (sl) + ": Mix", &param (sl, "mix") }, { "Slot " + juce::String (sl) + ": Pan", &param (sl, "pan") },
+                                      { "Slot " + juce::String (sl) + ": Width", &param (sl, "width") }, { "Slot " + juce::String (sl) + ": On / off", &param (sl, "on") },
+                                      { "Slot " + juce::String (sl) + ": Type", &param (sl, "type") } }, mod);
     }
 
 private:
@@ -307,7 +345,7 @@ private:
 
     struct Item { juce::Component* c; int w; };
     SeedProcessor& proc;
-    int selected = 1, shownType = -1, scroll = 0, maxScroll = 0;
+    int selected = 1, shownType = -1, scroll = 0, maxScroll = 0, dropRow = -1;
     juce::Viewport viewport;
     juce::Component holder;
     std::vector<std::unique_ptr<juce::Component>> detail;

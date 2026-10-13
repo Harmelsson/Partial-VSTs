@@ -60,7 +60,9 @@ struct Rig
     {
         proc->setPlayConfigDetails (0, 2, kSr, kBlock);
         proc->prepareToPlay (kSr, kBlock);
-        set (seed::ids::keyMode, 0.0f); // tests assume normal keys unless they choose a mode
+        // The keyboard always plays the scale (v0.7). "Normal keys" = the 12-EDO scale method: key 69 = 440 Hz.
+        set (seed::ids::method, 3.0f); set (seed::ids::edoSteps, 12.0f);
+        settleCalculator();
     }
 
     void set (const juce::String& id, float value)
@@ -102,6 +104,24 @@ struct Rig
             juce::MidiBuffer m;
             if (b == 0) m = midi;
             proc->processBlock (buf, m);
+            out.insert (out.end(), buf.getReadPointer (0), buf.getReadPointer (0) + kBlock);
+        }
+        return out;
+    }
+
+    /// Like render(), but lets the calculator deliver new scales while it runs (for changes made while notes are held).
+    std::vector<float> renderPumped (double seconds, juce::MidiBuffer midi = {})
+    {
+        std::vector<float> out;
+        const int blocks = (int) std::ceil (seconds * kSr / kBlock);
+        for (int b = 0; b < blocks; ++b)
+        {
+            buf.clear();
+            juce::MidiBuffer m;
+            if (b == 0) m = midi;
+            proc->pumpCalculator();
+            proc->processBlock (buf, m);
+            juce::Thread::sleep (3);
             out.insert (out.end(), buf.getReadPointer (0), buf.getReadPointer (0) + kBlock);
         }
         return out;
@@ -217,9 +237,9 @@ void testDynamic()
            "partial count 16 -> 64 -> 2 while held: fades, no pops",
            juce::String (maxStep (more), 4) + " / " + juce::String (maxStep (fewer), 4));
 
-    r.set (seed::ids::keyMode, 1.0f); // Seed-12
-    auto toggled = r.render (0.3);
-    check (maxStep (toggled) < steadyStep * 2.5f, "toggling 'keys follow seed' while held glides", juce::String (maxStep (toggled), 4));
+    r.set (seed::ids::method, 4.0f); // 12-EDO -> Seed-EDO (stretched octave): the held note slides to its new pitch
+    auto toggled = r.renderPumped (0.4);
+    check (maxStep (toggled) < steadyStep * 2.5f, "switching the scale method while a note is held glides", juce::String (maxStep (toggled), 4));
 }
 
 void testSafety()
@@ -249,7 +269,8 @@ void testKeys()
     std::cout << "keys follow seed" << std::endl;
     Rig r;
     r.set (seed::ids::seed, 2.5f);
-    r.set (seed::ids::keyMode, 1.0f); // Seed-12 (was "keys follow seed")
+    r.set (seed::ids::method, 4.0f); // Seed-EDO 12 (was "keys follow seed")
+    r.settleCalculator();
     auto x = tail (r.render (1.0, Rig::noteOn ({ 72 })), 0.5);
     const double want = 261.6255653005986 * 2.5;
     const double on = toneAmp (x, want), off = toneAmp (x, 523.25);
@@ -446,7 +467,7 @@ void testKeyModes()
     std::cout << "key modes" << std::endl;
     // Scale mode, seed 2, dissonance @ middle C: key 61 = first found note above the unison.
     Rig r;
-    r.set (seed::ids::keyMode, 2.0f);
+    r.set (seed::ids::method, 0.0f);
     r.settleCalculator();
     const auto fin = r.proc->finalScale();
     std::array<double, 80> c {}, st {};
@@ -456,25 +477,18 @@ void testKeyModes()
     check (n > 3 && toneAmp (x, want) > 0.02, "Scale: key 61 plays scale note 1", juce::String (c[1], 1) + " c = " + juce::String (want, 2) + " Hz");
     // Key 60 + N = one period up.
     Rig o;
-    o.set (seed::ids::keyMode, 2.0f);
+    o.set (seed::ids::method, 0.0f);
     o.settleCalculator();
     auto y = tail (o.render (0.8, Rig::noteOn ({ 60 + n })), 0.4);
     check (toneAmp (y, 523.2511) > 0.02, "Scale: key 60 + N = the 'octave'");
     // Switching a note off shifts the keys above it (the keyboard follows the playable notes).
     Rig d;
-    d.set (seed::ids::keyMode, 2.0f);
+    d.set (seed::ids::method, 0.0f);
     d.set (seed::ids::noteOn (1), 0.0f);
     d.settleCalculator();
     auto z = tail (d.render (0.8, Rig::noteOn ({ 61 })), 0.4);
     const double want2 = 261.6255653 * std::exp2 (c[2] / 1200.0);
     check (toneAmp (z, want2) > 0.02, "Scale: note 1 off -> key 61 plays note 2");
-    // Magnet 100%: every key lands on a scale note.
-    Rig m;
-    m.set (seed::ids::keyMode, 3.0f);
-    m.set (seed::ids::magnet, 100.0f);
-    m.settleCalculator();
-    auto w = tail (m.render (0.8, Rig::noteOn ({ 64 })), 0.4);   // E4 = 400 c -> nearest note 386.3 (5/4)
-    check (toneAmp (w, 261.6255653 * 1.25) > 0.02, "Magnet: key 64 snaps to 5/4 (386.3 c)");
 }
 
 void testPitch()
@@ -577,6 +591,7 @@ void testV04()
     std::cout << "v0.4 (scale ticks, reset edits, 0 ms attack, held notes)" << std::endl;
     // Custom partials start "sound only": adding one doesn't change the scale until ticked.
     Rig a;
+    a.set (seed::ids::method, 0.0f); // the Dissonance scale depends on the partials (EDO scales don't)
     a.settleCalculator();
     const auto before = a.proc->finalScale();
     a.set (seed::ids::customPartialCents (1), 1750.0f);
@@ -590,13 +605,14 @@ void testV04()
         return true;
     };
     check (sameScale (before, soundOnly), "unticked custom partial: scale unchanged");
-    auto y = tail (a.render (0.8, Rig::noteOn ({ 69 })), 0.4);
-    check (toneAmp (y, 440.0 * std::exp2 (1750.0 / 1200.0)) > 0.01, "...but it sounds");
+    auto y = tail (a.render (0.8, Rig::noteOn ({ 60 })), 0.4); // key 60 = the unison (261.63 Hz)
+    check (toneAmp (y, 261.6255653 * std::exp2 (1750.0 / 1200.0)) > 0.01, "...but it sounds");
     a.set (seed::ids::customPartialInScale (1), 1.0f);
     a.settleCalculator();
     check (! sameScale (before, a.proc->finalScale()), "ticked: now it shapes the scale");
     // Unticking a series partial changes the scale too (partial 3 out of the math).
     Rig b;
+    b.set (seed::ids::method, 0.0f);
     b.settleCalculator();
     const auto b0 = b.proc->finalScale();
     b.set (seed::ids::partialInScale (3), 0.0f);
@@ -625,7 +641,7 @@ void testV04()
 
     // Held notes are reported for the UI (Scale mode: key 60 + 2 = scale note 2).
     Rig h;
-    h.set (seed::ids::keyMode, 2.0f);
+    h.set (seed::ids::method, 0.0f);
     h.settleCalculator();
     h.render (0.1, Rig::noteOn ({ 62 }));
     const auto fin = h.proc->finalScale();
@@ -764,8 +780,7 @@ void testScala()
     check (found == 12 && std::abs (f.period - 1901.955) < 1e-6 && worst < 1e-6, "imported notes are played exactly",
            juce::String (found) + " notes, period " + juce::String (f.period, 3) + ", worst " + juce::String (worst, 9));
 
-    // The keyboard plays them: Scale key mode, key 61 = degree 1 = 146.30 c above the Fundamental.
-    r.set (seed::ids::keyMode, 2.0f);
+    // The keyboard plays them: key 61 = degree 1 = 146.30 c above the Fundamental.
     r.set (seed::ids::partials, 1.0f);
     r.settleCalculator();
     auto x = r.render (0.6, Rig::noteOn ({ 61 }));
@@ -863,7 +878,7 @@ void testV06()
     // ---- Release fades to (practically) nothing instead of being cut at -60 dB ----------------------
     {
         Rig r;
-        r.set (ids::release, 400.0f); r.set (ids::keyMode, 2.0f);
+        r.set (ids::release, 400.0f); r.set (ids::method, 0.0f);
         r.settleCalculator();
         r.render (0.5, Rig::noteOn ({ 60 }));
         juce::AudioBuffer<float> b (2, 32);
@@ -889,7 +904,7 @@ void testV06()
     // ---- Base key: the key that plays the unison ------------------------------------------------------
     {
         Rig r;
-        r.set (ids::keyMode, 2.0f); r.set (ids::baseKey, 57.0f);
+        r.set (ids::method, 0.0f); r.set (ids::baseKey, 57.0f);
         r.settleCalculator();
         const auto fin = r.proc->finalScale();
         std::array<double, 140> c {}, st {};
@@ -900,7 +915,7 @@ void testV06()
         check (toneAmp (tail (y, 0.2), 261.6255653 * std::exp2 (c[1] / 1200.0)) > 0.02, "base key A3: key 58 plays scale note 1",
                juce::String (c[1], 1) + " c");
         Rig d;
-        d.set (ids::keyMode, 2.0f);
+        d.set (ids::method, 0.0f);
         auto z = d.render (0.4, Rig::noteOn ({ 57 }));
         check (toneAmp (tail (z, 0.2), 261.6255653) < 0.005, "default base key C4: key 57 is NOT the unison");
     }
@@ -929,8 +944,7 @@ void testV06()
                "Seed-EDO 12 at seed 2.5: 12 equal steps of the stretched octave", juce::String (fin.notes[1].cents, 3) + " c");
         r.set (ids::noteOn (3), 0.0f);
         check (r.proc->finalScale().count == 13, "EDO notes can be switched off like any note (still listed)");
-        // The keyboard plays them: key 61 = step 1 in Scale mode.
-        r.set (ids::keyMode, 2.0f);
+        // The keyboard plays them: key 61 = step 1.
         r.settleCalculator();
         auto x = r.render (0.4, Rig::noteOn ({ 61 }));
         check (toneAmp (tail (x, 0.2), 261.6255653 * std::exp2 (1586.3137 / 12.0 / 1200.0)) > 0.02, "Seed-EDO: key 61 plays step 1");
@@ -939,7 +953,7 @@ void testV06()
     // ---- Scale lock ----------------------------------------------------------------------------------------
     {
         Rig r;
-        r.set (ids::keyMode, 2.0f);
+        r.set (ids::method, 0.0f);
         r.settleCalculator();
         const auto before = r.proc->finalScale();
         r.proc->setScaleLocked (true);
@@ -979,8 +993,8 @@ void testV06()
         Rig m;
         check (m.proc->addModLink (1, ids::seed) && m.proc->addModLink (1, fx (1, "mix"), 50.0f) && m.proc->addModLink (2, ids::seed),
                "one modulator can be linked to many fields, many modulators to one field");
-        check (! m.proc->addModLink (1, ids::seed) && ! m.proc->addModLink (1, ids::keyMode) && ! m.proc->addModLink (9, ids::seed),
-               "duplicate / non-float / out-of-range links are refused");
+        check (! m.proc->addModLink (1, ids::seed) && ! m.proc->addModLink (1, ids::scaleLock) && ! m.proc->addModLink (1, ids::partialsLock) && ! m.proc->addModLink (9, ids::seed),
+               "duplicate / lock / out-of-range links are refused");
         check (m.proc->modMaskFor (ids::seed) == 3u && m.proc->modMaskFor (fx (1, "mix")) == 1u, "link masks name the modulators");
         m.set (ids::modShape (1), 3.0f); m.set (ids::modRate (1), 0.25f); m.set (ids::modDepth (1), 100.0f);
         m.render (0.1);
@@ -1061,16 +1075,16 @@ void testV06()
         if (ok)
         {
             const juce::DragAndDropTarget::SourceDetails d (juce::var ("mod:3"), nullptr, {});
-            ok = seedBox->isInterestedInDragSource (d) && ! partialsBox->isInterestedInDragSource (d); // integers can't be modulated
+            ok = seedBox->isInterestedInDragSource (d) && partialsBox->isInterestedInDragSource (d); // integer boxes too (v0.7)
             seedBox->itemDropped (d);
         }
-        check (ok && r.proc->modMaskFor (ids::seed) == 4u, "dropping modulator 3 on the Seed box links it (integer boxes refuse)");
+        check (ok && r.proc->modMaskFor (ids::seed) == 4u, "dropping modulator 3 on the Seed box links it (integer boxes accept too)");
     }
 
     // ---- Short notes still report themselves to the UI ------------------------------------------------------------------------
     {
         Rig r;
-        r.set (ids::keyMode, 2.0f);
+        r.set (ids::method, 0.0f);
         r.settleCalculator();
         const uint32_t before = r.proc->uiHitSeq.load();
         juce::MidiBuffer m; // note on + off inside ONE block: the held-note list never sees it
@@ -1125,6 +1139,213 @@ void testV06()
     }
 }
 
+// ================================================================================================
+// v0.7
+// ================================================================================================
+void testLfoShape()
+{
+    std::cout << "LFO shapes (drawn curves)" << std::endl;
+    pvst::LfoShape s;
+    s.preset (0);
+    check (std::abs (s.eval (0.25) - 1.0f) < 0.01f && std::abs (s.eval (0.75) + 1.0f) < 0.01f && std::abs (s.eval (0.0)) < 1e-4f, "sine preset: +1 at 1/4, -1 at 3/4");
+    s.preset (1);
+    check (std::abs (s.eval (0.5) - 1.0f) < 1e-4f && std::abs (s.eval (0.25)) < 1e-4f, "triangle preset");
+    s.preset (4);
+    check (s.eval (0.25) > 0.99f && s.eval (0.75) < -0.99f, "square preset");
+    s.preset (2); s.c[0] = 1.0f; // bent: slow start
+    check (s.eval (0.5) < -0.8f, "a bent segment (c = +1) starts slowly: t^4", juce::String (s.eval (0.5), 3));
+    s.c[0] = -1.0f;
+    check (s.eval (0.5) > 0.6f, "bent the other way (c = -1) starts fast", juce::String (s.eval (0.5), 3));
+    pvst::LfoShape a, b;
+    a.preset (8);
+    check (b.fromText (a.toText()) && b.n == a.n && std::abs (b.eval (0.3) - a.eval (0.3)) < 1e-3f, "shape text round trip");
+    check (! b.fromText ("garbage"), "garbage text is refused");
+    pvst::LfoShape w;
+    w.n = 3; w.x[0] = 0.3f; w.x[1] = 0.2f; w.x[2] = 0.9f; w.y[0] = 5; w.y[1] = -5; w.y[2] = 0; w.sanitize();
+    check (w.x[0] == 0.0f && w.x[2] == 1.0f && w.x[1] > w.x[0] && w.y[0] == 1.0f && w.y[1] == -1.0f, "sanitize: ends pinned, x rising, y clamped");
+}
+
+void testV07()
+{
+    std::cout << "v0.7 (any-parameter modulation, LFO triggers, locks, key modes gone, window scale)" << std::endl;
+    namespace ids = seed::ids;
+    using seed::ids::fx;
+
+    // ---- The keyboard always plays the scale: the old Key mode parameter no longer changes anything ------------------
+    {
+        Rig r;
+        r.set (ids::seed, 2.5f);
+        r.set (ids::keyMode, 1.0f); // legacy "Seed-12"
+        auto x = tail (r.render (0.6, Rig::noteOn ({ 72 })), 0.3);
+        check (toneAmp (x, 523.2511) > 0.02 && toneAmp (x, 654.06) < 0.005, "the legacy Key mode parameter is ignored: EDO 12 plays plain 12-EDO (key 72 = 523 Hz)");
+    }
+
+    // ---- Anything can be modulated: switches, choices and integers too --------------------------------------------------------
+    {
+        Rig r;
+        r.proc->addModLink (1, ids::drone);                                       // a switch
+        r.set (ids::modShape (1), 3.0f); r.set (ids::modRate (1), 0.25f); r.set (ids::modDepth (1), 100.0f);
+        auto x = r.render (0.4);
+        check (peakOf (tail (x, 0.2)) > 0.01f, "a modulator on the Drone switch turns it on (switches use the full range)");
+        Rig q;
+        q.proc->addModLink (1, ids::method);                                      // a choice that drives the CALCULATOR
+        q.set (ids::modShape (1), 3.0f); q.set (ids::modRate (1), 0.25f); q.set (ids::modDepth (1), 100.0f);
+        q.render (0.3);
+        q.proc->pumpCalculator();
+        check (q.proc->currentCalculatorSettings().method == xen::Method::SeedEdo, "a modulator on the Scale method choice reaches the calculator (+full range = Seed-EDO)");
+        Rig n;
+        n.proc->addModLink (1, ids::noteOn (2));                                  // a per-note edit (plot / table items)
+        n.set (ids::modShape (1), 3.0f); n.set (ids::modRate (1), 0.25f); n.set (ids::modDepth (1), -100.0f); // starts at -1: note on -> modulated off
+        n.render (0.3);
+        check (! n.proc->noteEditsFromParams().on[1], "a modulator can switch a scale note off (per-note edits are modulatable)");
+        check (n.proc->isModulatable (ids::cutoff) && ! n.proc->isModulatable (ids::scaleLock) && ! n.proc->isModulatable (ids::partialsLock), "everything is modulatable except the two locks");
+        n.proc->clearModLinks();
+        n.render (0.1);
+        check (n.proc->modOffsetNorm (n.proc->param (ids::noteOn (2))) == 0.0f, "removing a link leaves no stale offset behind");
+    }
+
+    // ---- Lock partials ---------------------------------------------------------------------------------------------------------------
+    {
+        Rig r;
+        r.set (ids::method, 0.0f);
+        r.settleCalculator();
+        r.proc->setPartialsLocked (true);
+        r.set (ids::seed, 2.5f);
+        r.settleCalculator();
+        const auto cs = r.proc->currentCalculatorSettings();
+        check (r.proc->partialsLocked() && std::abs (cs.partialSeed() - 2.0) < 1e-6 && std::abs (cs.modelPartials()[1].cents - 1200.0) < 1e-6,
+               "partials locked: partial 2 stays at 1200 c while the seed moves to 2.5", juce::String (cs.modelPartials()[1].cents, 1));
+        check (std::abs (r.proc->calculatorOutput().curve.periodCents - 1586.3137) < 1e-3, "partials locked: the seed still sets the period");
+        auto x = tail (r.render (0.6, Rig::noteOn ({ 60 })), 0.3);
+        check (toneAmp (x, 523.2511) > 0.01 && toneAmp (x, 261.6255653 * 2.5) < 0.005, "partials locked: the sound keeps its harmonic partials (partial 2 at 523 Hz)");
+        juce::MemoryBlock mb;
+        r.proc->getStateInformation (mb);
+        Rig q;
+        q.proc->setStateInformation (mb.getData(), (int) mb.getSize());
+        check (q.proc->partialsLocked() && std::abs (q.proc->currentCalculatorSettings().partialSeed() - 2.0) < 1e-6, "the partials lock is saved with the project");
+        r.proc->randomize (SeedProcessor::Scope::Tuning, 1.0);
+        check (r.proc->partialsLocked(), "Dice leaves the partials lock alone");
+        r.proc->setPartialsLocked (false);
+        r.set (ids::seed, 2.5f);
+        r.settleCalculator();
+        check (std::abs (r.proc->currentCalculatorSettings().modelPartials()[1].cents - 1586.3137) < 1e-3, "unlocked: the partials follow the seed again");
+    }
+
+    // ---- LFO: drawn shapes, triggers, one-shot, audio sources ---------------------------------------------------------------------------
+    {
+        Rig r;
+        r.proc->applyLfoPreset (1, 4); // square, drawn
+        auto* sp = r.proc->apvts.getParameter (ids::modShape (1));
+        check (std::lround (sp->convertFrom0to1 (sp->getValue())) == seed::kShapeDrawn, "drawing a curve switches the modulator to Drawn");
+        r.set (ids::modRate (1), 1.0f); r.set (ids::modDepth (1), 100.0f);
+        r.render (0.1);
+        const float hi = r.proc->uiModValue[0].load();
+        r.render (0.5);
+        check (hi > 0.9f && r.proc->uiModValue[0].load() < -0.9f, "a drawn square LFO at 1 Hz flips halfway through the cycle");
+        juce::MemoryBlock mb;
+        r.proc->getStateInformation (mb);
+        Rig q;
+        q.proc->setStateInformation (mb.getData(), (int) mb.getSize());
+        check (std::abs (q.proc->lfoShape (1).eval (0.25) - 1.0f) < 1e-3f && std::abs (q.proc->lfoShape (1).eval (0.75) + 1.0f) < 1e-3f, "drawn curves are saved with the project");
+    }
+    {   // Never: free-running. MIDI: restarts on every note-on.
+        auto run = [] (int trig) {
+            Rig r;
+            r.set (ids::modShape (1), 2.0f); r.set (ids::modRate (1), 0.1f); r.set (ids::modTrig (1), (float) trig);
+            r.render (2.0);
+            const float before = r.proc->uiModPhase[0].load();
+            r.render (0.05, Rig::noteOn ({ 60 }));
+            return std::pair<float, float> { before, r.proc->uiModPhase[0].load() };
+        };
+        const auto never = run (0), midi = run (1);
+        check (never.first > 0.15f && never.second > never.first, "trigger Never: the LFO keeps running through a note-on", juce::String (never.first, 3) + " -> " + juce::String (never.second, 3));
+        check (midi.first > 0.15f && midi.second < 0.02f, "trigger MIDI: a note-on restarts the LFO", juce::String (midi.first, 3) + " -> " + juce::String (midi.second, 3));
+    }
+    {   // Audio (the plugin's own output) with a threshold.
+        Rig r;
+        r.set (ids::modShape (1), 2.0f); r.set (ids::modRate (1), 0.1f); r.set (ids::modTrig (1), 2.0f); r.set (ids::modSrc (1), 1.0f); r.set (ids::modThr (1), -40.0f);
+        r.render (2.0); // silence: below the threshold, armed
+        const float before = r.proc->uiModPhase[0].load();
+        const uint32_t trigs = r.proc->uiModTrig[0].load();
+        r.render (0.2, Rig::noteOn ({ 60 }, 1.0f));
+        check (before > 0.15f && r.proc->uiModTrig[0].load() == trigs + 1 && r.proc->uiModPhase[0].load() < 0.05f, "trigger Audio (output): the note's level crossing the threshold restarts the LFO",
+               juce::String (before, 3) + " -> " + juce::String (r.proc->uiModPhase[0].load(), 3));
+        Rig quiet;
+        quiet.set (ids::modShape (1), 2.0f); quiet.set (ids::modRate (1), 0.1f); quiet.set (ids::modTrig (1), 2.0f); quiet.set (ids::modSrc (1), 1.0f); quiet.set (ids::modThr (1), 0.0f);
+        quiet.render (0.1);
+        const uint32_t t0 = quiet.proc->uiModTrig[0].load();
+        quiet.render (0.3, Rig::noteOn ({ 60 }, 0.3f));
+        check (quiet.proc->uiModTrig[0].load() == t0, "trigger Audio: a level under the threshold does not trigger");
+    }
+    {   // One-shot: plays one cycle after the trigger, then holds.
+        Rig r;
+        r.set (ids::modShape (1), 2.0f); r.set (ids::modRate (1), 10.0f); r.set (ids::modLoop (1), 0.0f);
+        r.render (0.5);
+        const float a = r.proc->uiModValue[0].load();
+        r.render (0.5);
+        check (a > 0.99f && std::abs (r.proc->uiModValue[0].load() - a) < 1e-6f, "one-shot: after one cycle the LFO holds its last value", juce::String (a, 3));
+    }
+    {   // Audio from the external sidechain bus (needs a host that connects it; here we switch the bus on ourselves).
+        Rig r;
+        juce::AudioProcessor::BusesLayout layout;
+        layout.inputBuses.add (juce::AudioChannelSet::disabled());
+        layout.inputBuses.add (juce::AudioChannelSet::stereo());
+        layout.outputBuses.add (juce::AudioChannelSet::stereo());
+        const bool ok = r.proc->setBusesLayout (layout);
+        r.proc->prepareToPlay (kSr, kBlock);
+        r.set (ids::modShape (1), 2.0f); r.set (ids::modRate (1), 0.1f); r.set (ids::modTrig (1), 2.0f); r.set (ids::modSrc (1), 2.0f); r.set (ids::modThr (1), -20.0f);
+        // JUCE lays input and output buses over the SAME channels (the sidechain is channels 0-1 here, as the main input is off).
+        juce::AudioBuffer<float> b (2, kBlock);
+        juce::MidiBuffer none;
+        for (int i = 0; i < 150; ++i) { b.clear(); r.proc->processBlock (b, none); }
+        const uint32_t t0 = r.proc->uiModTrig[0].load();
+        for (int i = 0; i < 5; ++i) { b.clear(); for (int ch = 0; ch < 2; ++ch) for (int k = 0; k < kBlock; ++k) b.setSample (ch, k, 0.5f); r.proc->processBlock (b, none); }
+        check (ok && r.proc->uiModTrig[0].load() == t0 + 1, "trigger Audio (sidechain bus): a signal on the sidechain input restarts the LFO",
+               juce::String (ok ? "layout ok" : "layout refused") + ", triggers " + juce::String (r.proc->uiModTrig[0].load() - t0) + ", buses " + juce::String (r.proc->getBusCount (true)) + ", sc enabled " + juce::String ((int) r.proc->getBus (true, 1)->isEnabled()));
+        float outPk = 0.0f;
+        for (int ch = 0; ch < 2; ++ch) outPk = std::max (outPk, b.getMagnitude (ch, 0, kBlock));
+        check (outPk == 0.0f, "the sidechain signal is never passed to the output");
+    }
+
+    // ---- Window scale + the editor wiring (locate / drop on a choice) ---------------------------------------------------------------------
+    {
+        Rig r;
+        r.proc->setUiScale (500);
+        check (r.proc->uiScale() == 200, "window scale is limited to 200 %");
+        r.proc->setUiScale (10);
+        check (r.proc->uiScale() == 25, "... and to at least 25 %");
+        r.proc->setUiScale (150);
+        std::unique_ptr<juce::AudioProcessorEditor> ed (r.proc->createEditor());
+        auto* se = static_cast<SeedEditor*> (ed.get());
+        check (std::abs (ed->getTransform().getScaleFactor() - 1.5f) < 0.01f, "the editor opens at the remembered window scale", juce::String (ed->getTransform().getScaleFactor(), 3));
+        r.proc->setUiScale (100);
+
+        se->locateParam (fx (3, "mix"));
+        check (se->currentTabIndex() == 3 && se->selectedFxSlot() == 3, "clicking a link to 'FX 3 mix' opens the FX tab and selects slot 3");
+        se->locateParam (ids::eq (4, "freq"));
+        check (se->selectedEqBand() == 4, "a link to an EQ band selects that band");
+        se->locateParam (ids::attack);
+        check (se->currentTabIndex() == 1, "a link to Attack opens the Envelope tab");
+        se->locateParam (ids::shimmer);
+        check (se->currentTabIndex() == 2, "a link to Shimmer opens the Timbre tab");
+
+        std::function<juce::Component* (juce::Component&)> findChoice = [&findChoice] (juce::Component& c) -> juce::Component* {
+            if (auto* cb = dynamic_cast<pvst::ChoiceBox*> (&c)) if (cb->usesParam (seed::ids::method)) return cb;
+            for (auto* child : c.getChildren()) if (auto* f = findChoice (*child)) return f;
+            return nullptr;
+        };
+        auto* methodBox = dynamic_cast<pvst::ChoiceBox*> (findChoice (*ed));
+        bool ok = methodBox != nullptr;
+        if (ok)
+        {
+            const juce::DragAndDropTarget::SourceDetails d (juce::var ("mod:5"), nullptr, juce::Point<int> (10, 10));
+            ok = methodBox->isInterestedInDragSource (d);
+            methodBox->itemDropped (d);
+        }
+        check (ok && r.proc->modMaskFor (ids::method) == 16u, "a modulator can be dropped on a choice box (Scale method)");
+    }
+}
+
 void snapshot (const juce::File& file)
 {
     SeedProcessor proc;
@@ -1142,12 +1363,17 @@ void snapshot (const juce::File& file)
     setp (seed::ids::eq (1, "on"), 1.0f); setp (seed::ids::eq (1, "gain"), 6.0f);
     setp (seed::ids::eq (2, "on"), 1.0f); setp (seed::ids::eq (2, "gain"), -9.0f); setp (seed::ids::eq (2, "kt"), 50.0f);
     setp (seed::ids::eq (4, "on"), 1.0f); setp (seed::ids::eq (4, "type"), (float) pvst::eq::HighCut); setp (seed::ids::eq (4, "freq"), 6000.0f); setp (seed::ids::eq (4, "steep"), 2.0f);
+    { pvst::LfoShape ls; ls.preset (8); proc.setLfoShape (1, ls); }
+    setp (seed::ids::modTrig (1), 1.0f);
+    setp (seed::ids::modTrig (2), 2.0f);
+    proc.addModLink (2, seed::ids::fx (4, "kMake"), 100.0f); proc.addModLink (2, seed::ids::baseKey, 50.0f);
+    if (std::getenv ("SEED_PLOCK")) proc.setPartialsLocked (true);
     if (auto* mth = std::getenv ("SEED_METHOD")) setp (seed::ids::method, (float) juce::String (mth).getIntValue());
     if (auto* st = std::getenv ("SEED_STEPS")) setp (seed::ids::edoSteps, (float) juce::String (st).getIntValue());
     if (std::getenv ("SEED_LOCK")) { proc.pumpCalculator(); juce::Thread::sleep (200); proc.pumpCalculator(); proc.setScaleLocked (true); setp (seed::ids::seed, 2.3f); }
     if (auto* tab = std::getenv ("SEED_TAB")) juce::ignoreUnused (tab);
     // Hold a note (Scale mode, key 64 = scale note 4) so the played-note highlight shows.
-    setp (seed::ids::keyMode, 2.0f);
+    setp (seed::ids::method, 0.0f);
     proc.setPlayConfigDetails (0, 2, kSr, kBlock);
     proc.prepareToPlay (kSr, kBlock);
     {
@@ -1161,9 +1387,10 @@ void snapshot (const juce::File& file)
             juce::Thread::sleep (5);
         }
     }
-    if (auto* km = std::getenv ("SEED_KEYMODE")) setp (seed::ids::keyMode, (float) juce::String (km).getIntValue());
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
     if (auto* tab = std::getenv ("SEED_TAB")) static_cast<SeedEditor*> (ed.get())->showTab (juce::String (tab).getIntValue());
+    if (auto* sel = std::getenv ("SEED_SEL")) static_cast<SeedEditor*> (ed.get())->selectModulator (juce::String (sel).getIntValue());
+    if (auto* loc = std::getenv ("SEED_LOCATE")) static_cast<SeedEditor*> (ed.get())->locateParam (loc);
     juce::MessageManager::getInstance()->runDispatchLoopUntil (900); // calculator + animations settle
     auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
     juce::FileOutputStream out (file);
@@ -1202,7 +1429,7 @@ void bench()
 void releaseProbe()
 {
     Rig r;
-    r.set (seed::ids::keyMode, 2.0f);
+    r.set (seed::ids::method, 0.0f);
     r.settleCalculator();
     r.render (0.5, Rig::noteOn ({ 60 }));
     auto x = r.render (0.8, Rig::noteOff (60));
@@ -1242,6 +1469,8 @@ int main (int argc, char** argv)
     testScala();
     testEqMaths();
     testV06();
+    testLfoShape();
+    testV07();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")
             snapshot (juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]));

@@ -11,6 +11,7 @@
 #include "SeedEngine.h"
 #include "SeedParams.h"
 #include "dsp/Modulator.h"
+#include <mutex>
 #include "dsp/ChirpReverb.h"
 #include "dsp/PartialDelay.h"
 #include "dsp/RoughReverb.h"
@@ -85,6 +86,26 @@ public:
     /// settings: the notes WILL change, the UI asks first).
     void setScaleLocked (bool lock);
 
+    // ---- Partials lock (message thread) -----------------------------------------------------------------
+    /// Locked = the partial series keeps the seed stretch, rolloff and count it had when locked (hand
+    /// edits still apply on top). The seed then only sets the "octave" / scale period.
+    bool partialsLocked() const { return P (seed::ids::partialsLock)->getValue() > 0.5f; }
+    void setPartialsLocked (bool lock);
+
+    // ---- Drawn LFO shapes (message thread) ------------------------------------------------------------------
+    pvst::LfoShape lfoShape (int mod) const { return lfoUI[(size_t) mod - 1]; }
+    /// Replaces modulator `mod`'s drawn curve and switches its shape to "Drawn".
+    void setLfoShape (int mod, const pvst::LfoShape& shape);
+    void applyLfoPreset (int mod, int preset);
+    /// Where each modulator is in its cycle (0..1) and how often it was retriggered (for the UI).
+    std::array<std::atomic<float>, seed::kNumMods> uiModPhase {};
+    std::array<std::atomic<uint32_t>, seed::kNumMods> uiModTrig {};
+
+    // ---- Window scale (message thread) ----------------------------------------------------------------------------------
+    /// Editor scale in percent (25..200), remembered between sessions in a small settings file.
+    int uiScale() const { return uiScalePercent; }
+    void setUiScale (int percent);
+
     // ---- Modulation links (message thread, except modOffsetNorm) ------------------------------------
     // A modulator is linked to any number of float parameters (drag a modulator onto a field). Each link
     // has its own amount (-100..+100 %, multiplies the modulator's depth). Stored in the plugin state
@@ -92,6 +113,8 @@ public:
     struct ModLink { int mod = 0; juce::String paramId; float amount = 100.0f; };
     static constexpr int kMaxLinks = 256;
     std::vector<ModLink> modLinks() const;
+    /// True for every parameter a modulator can be dropped on (all but the two locks and legacy ones).
+    bool isModulatable (const juce::String& paramId) const;
     /// Links `mod` (1..kNumMods) to the parameter. False if not a float parameter, already linked or table full.
     bool addModLink (int mod, const juce::String& paramId, float amountPercent = 100.0f);
     void removeModLink (int mod, const juce::String& paramId);
@@ -145,6 +168,8 @@ private:
     void timerCallback() override { pumpCalculator(); }
     /// Plain value of a parameter with the modulators' offsets applied (audio thread).
     double eff (juce::RangedAudioParameter* p) const;
+    /// Same, usable from any thread (reads the offsets the audio thread published). For calculator values.
+    double effUI (juce::RangedAudioParameter* p) const;
     void buildEngineParams (double blockSeconds);
     void updateScaleOnAudioThread();
     void handleMidi (const juce::MidiMessage& m);
@@ -184,6 +209,30 @@ private:
     std::unique_ptr<std::atomic<float>[]> uiModOffset; // same, for the UI (only linked parameters are kept fresh)
     std::array<double, seed::kNumMods> lastModValue {};
     std::atomic<uint32_t> linksEpoch { 1 };
+    std::vector<double> swing;                     // per parameter: 0.5 (continuous) or 1.0 (discrete) x depth
+    std::vector<uint32_t> touchStamp;              // per parameter: last block that wrote its UI offset
+    uint32_t touchBlock = 0;
+    std::vector<int> touchedPrev;
+    // LFO: drawn shapes (message thread copy, shared copy behind a try-lock, audio copy) + trigger state.
+    std::array<pvst::LfoShape, seed::kNumMods> lfoUI, lfoShared, lfoAudio;
+    juce::SpinLock lfoLock;
+    uint64_t lfoVersion = 0, lfoAudioVersion = 0;
+    void publishLfo();
+    void writeLfoState();
+    void loadLfoState (const juce::String& text);
+    std::array<bool, seed::kNumMods> trigArmed {};
+    bool midiNoteOnInBlock = false;
+    float levelIn = 0.0f, levelSc = 0.0f;          // peak of this block's input / sidechain buses
+    std::atomic<float> levelOut { 0.0f };          // peak of the last block's output (before the safety stage)
+    std::array<juce::RangedAudioParameter*, seed::kNumMods> mTrig {}, mThr {}, mSrc {}, mLoop {};
+    // Partials lock snapshot.
+    std::atomic<bool> lockedPValid { false };
+    std::atomic<float> lockedPSeed { 2.0f }, lockedPRolloff { 1.0f };
+    std::atomic<int> lockedPCount { 16 };
+    bool publishedPLocked = false;
+    void setLockedPartialsFromText (const juce::String& text);
+    juce::String lockedPartialsText() const;
+    int uiScalePercent = 100;
     std::vector<ModLink> links;                    // the truth (message thread); mirrored into linkSlots + state
     void commitLinks();                            // linkSlots + the "modLinks" state property
     void loadLinksFromText (const juce::String& text);

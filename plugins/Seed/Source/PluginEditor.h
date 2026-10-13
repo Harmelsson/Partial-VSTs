@@ -41,6 +41,38 @@ private:
     juce::Component* filler = nullptr;
 };
 
+/// A soft orange glow around a rectangle (editor coordinates): "this is the control you clicked in the modulator list".
+/// Pulses, then fades out after a few seconds. Lies over everything and never takes mouse clicks.
+class GlowOverlay : public juce::Component, private juce::Timer
+{
+public:
+    GlowOverlay() { setInterceptsMouseClicks (false, false); }
+    void flash (juce::Rectangle<int> r) { target = r.expanded (4); age = 0.0f; active = true; startTimerHz (40); repaint(); }
+    void paint (juce::Graphics& g) override
+    {
+        if (! active) return;
+        const float fade = age < 3.0f ? 1.0f : juce::jmax (0.0f, 1.0f - (age - 3.0f) / 2.0f);
+        const float pulse = 0.75f + 0.25f * std::sin (age * 7.0f);
+        for (int i = 6; i >= 1; --i) // halo: wide and faint -> tight and bright
+        {
+            g.setColour (pvst::theme::modified.withAlpha (fade * pulse * (0.05f + 0.07f * (float) (7 - i))));
+            g.drawRoundedRectangle (target.toFloat().expanded ((float) i * 1.6f), 3.0f + (float) i, 2.0f);
+        }
+        g.setColour (pvst::theme::modified.withAlpha (fade));
+        g.drawRoundedRectangle (target.toFloat(), 3.0f, 2.0f);
+    }
+private:
+    void timerCallback() override
+    {
+        age += 0.025f;
+        if (age > 5.0f) { active = false; stopTimer(); }
+        repaint();
+    }
+    juce::Rectangle<int> target;
+    float age = 0.0f;
+    bool active = false;
+};
+
 /// The FX tab: the rack (list + slot settings) on the left, the 5-band EQ on the right.
 class FxPage : public juce::Component
 {
@@ -66,12 +98,20 @@ public:
     void resized() override;
     bool hasCalculatorResult() const { return proc.hasCalculatorResult(); }
     void showTab (int index);
+    int currentTabIndex() const { return currentTab; }
+    void selectModulator (int m) { modPanel.select (m); }
+    int selectedFxSlot() const { return fxPage != nullptr ? fxPage->rack.selectedSlot() : 0; }
+    int selectedEqBand() const { return fxPage != nullptr ? fxPage->eq.selectedBand() : 0; }
 
     // pvst::ModDropHandler: a modulator chip dropped on a number box links it.
     void modDroppedOn (juce::RangedAudioParameter& prm, int mod) override;
     unsigned modMaskFor (const juce::RangedAudioParameter& prm) override { return proc.modMaskFor (prm.getParameterID()); }
     float modOffsetNorm (const juce::RangedAudioParameter& prm) override { return proc.modOffsetNorm (prm); }
     void modRemoveFrom (juce::RangedAudioParameter& prm, int mod) override { proc.removeModLink (mod, prm.getParameterID()); }
+    bool canModulate (const juce::RangedAudioParameter& prm) override { return proc.isModulatable (prm.getParameterID()); }
+    /// Jumps to the control of a parameter: opens its tab (FX slot / EQ band too), scrolls to it, lights it up.
+    void locateParam (const juce::String& id);
+    void mouseUp (const juce::MouseEvent&) override;
 
 private:
     void timerCallback() override;
@@ -94,8 +134,13 @@ private:
     // Calculator.
     pvst::ScrubBox fundamentalBox, seedBox, partialsBox, rolloffBox, minDipBox, toleranceBox, minSharedBox, edoStepsBox;
     pvst::ChoiceBox methodBox;
-    pvst::FlatButton resetEdits { "Reset edits" }, diceTuning { "Dice tuning" }, lockScale { "Lock scale" };
+    pvst::FlatButton resetEdits { "Reset edits" }, diceTuning { "Dice tuning" }, lockScale { "Lock scale" }, lockPartials { "Lock partials" };
     void onLockClicked();
+    void onLockPartialsClicked();
+    void releaseFocusToHost();
+    // Window scale 25..200 % (header).
+    pvst::FlatButton scaleDown { "-" }, scaleLabel { "100%" }, scaleUp { "+" };
+    void changeScale (int percent);
     // Scala (v0.5): import a scale / export what the keyboard plays / fit the seed to the scale.
     pvst::FlatButton importScl { "Import .scl" }, exportScl { "Export .scl" }, fitSeed { "Fit seed" };
     std::unique_ptr<juce::FileChooser> chooser;
@@ -124,6 +169,7 @@ private:
     pvst::EnvelopeView* envelopeView = nullptr;
     FxPage* fxPage = nullptr;
     ModPanel modPanel;
+    GlowOverlay glow;
     juce::TooltipWindow tooltipWindow { this, 600 };
 
     juce::Rectangle<int> calcArea, synthArea;

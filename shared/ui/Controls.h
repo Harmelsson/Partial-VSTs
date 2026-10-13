@@ -11,6 +11,7 @@
 //   - Double-click: type an exact value. Middle-click (or Alt+click): back to default.
 // SegmentedToggle — ArtHar's "Seed | Hand" style two-way switch for a bool parameter.
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <vector>
 #include "ui/Theme.h"
 
 namespace pvst
@@ -25,10 +26,110 @@ struct ModDropHandler
     virtual unsigned modMaskFor (const juce::RangedAudioParameter& p) = 0;           // bit m-1 = modulator m
     virtual float modOffsetNorm (const juce::RangedAudioParameter& p) = 0;           // live, normalised units
     virtual void modRemoveFrom (juce::RangedAudioParameter& p, int mod) = 0;
+    virtual bool canModulate (const juce::RangedAudioParameter& p) = 0;               // every editable parameter, except the two locks
+};
+
+/// A control bound to parameter(s): lets the editor find "the control for parameter X" (click a modulator
+/// link -> switch to the tab and light the control up).
+struct ParamBound
+{
+    virtual ~ParamBound() = default;
+    virtual bool usesParam (const juce::String& id) const = 0;
 };
 inline ModDropHandler* findModHandler (juce::Component* c)
 {
     return dynamic_cast<ModDropHandler*> (juce::DragAndDropContainer::findParentDragContainerFor (c));
+}
+
+/// Mixin for every control that accepts a modulator chip dropped on it: highlights while a chip hovers,
+/// links on drop, and shows which modulators drive it (orange "~1 3" tag + a bar where they push it).
+/// `modParamAt` says which parameter a drop at that point means (controls with several parameters return different ones).
+class ModAware : public juce::DragAndDropTarget, private juce::Timer
+{
+public:
+    explicit ModAware (juce::Component* ownerComponent) : owner (*ownerComponent) { startTimerHz (20); }
+
+    bool isInterestedInDragSource (const SourceDetails& d) override
+    {
+        if (! d.description.toString().startsWith ("mod:")) return false;
+        auto* p = modParamAt (d.localPosition);
+        if (p == nullptr) return false;
+        auto* h = findModHandler (&owner);
+        return h == nullptr || h->canModulate (*p);
+    }
+    void itemDragEnter (const SourceDetails& d) override { hover = modParamAt (d.localPosition); owner.repaint(); }
+    void itemDragMove (const SourceDetails& d) override { auto* p = modParamAt (d.localPosition); if (p != hover) { hover = p; owner.repaint(); } }
+    void itemDragExit (const SourceDetails&) override { hover = nullptr; owner.repaint(); }
+    void itemDropped (const SourceDetails& d) override
+    {
+        hover = nullptr;
+        if (auto* p = modParamAt (d.localPosition))
+            if (auto* h = findModHandler (&owner))
+                h->modDroppedOn (*p, d.description.toString().fromFirstOccurrenceOf ("mod:", false, false).getIntValue());
+        owner.repaint();
+    }
+
+protected:
+    virtual juce::RangedAudioParameter* modParamAt (juce::Point<int> localPos) = 0;
+    /// The parameter whose modulation is shown on the control (default: the one under its centre).
+    virtual juce::RangedAudioParameter* primaryModParam() { return modParamAt (owner.getLocalBounds().getCentre()); }
+
+    /// Call at the end of paint(): `box` = the control's drawn area.
+    void paintModOverlay (juce::Graphics& g, juce::Rectangle<int> box, bool showNumbers = true)
+    {
+        if (hover != nullptr) { g.setColour (theme::modified); g.drawRect (box, 2); }
+        if (shownMask == 0) return;
+        if (showNumbers)
+        {
+            juce::String nums;
+            for (int m = 0; m < 16; ++m) if (shownMask & (1u << m)) nums << (nums.isEmpty() ? "" : " ") << (m + 1);
+            g.setColour (theme::modified);
+            g.setFont (theme::mono (10.5f));
+            g.drawText ("~" + nums, box.withHeight (12).translated (0, -13), juce::Justification::centredRight, false);
+        }
+        if (auto* p = primaryModParam())
+        {
+            const float base = p->getValue(), now = juce::jlimit (0.0f, 1.0f, base + shownOffset);
+            auto bar = juce::Rectangle<float> ((float) box.getX() + 1.0f, (float) box.getBottom() - 4.0f, (float) box.getWidth() - 2.0f, 3.0f);
+            g.setColour (theme::mix (0.15f)); g.fillRect (bar);
+            g.setColour (theme::modified.withAlpha (0.85f));
+            g.fillRect (juce::Rectangle<float> (bar.getX() + bar.getWidth() * juce::jmin (base, now), bar.getY(), juce::jmax (1.5f, bar.getWidth() * std::abs (now - base)), bar.getHeight()));
+        }
+    }
+
+    juce::Component& owner;
+    juce::RangedAudioParameter* hover = nullptr;
+
+private:
+    void timerCallback() override
+    {
+        if (! owner.isVisible()) return;
+        auto* p = primaryModParam();
+        auto* h = findModHandler (&owner);
+        const unsigned mask = (p != nullptr && h != nullptr) ? h->modMaskFor (*p) : 0u;
+        const float off = mask != 0 ? h->modOffsetNorm (*p) : 0.0f;
+        if (mask != shownMask || std::abs (off - shownOffset) > 1e-4f) { shownMask = mask; shownOffset = off; owner.repaint(); }
+    }
+    unsigned shownMask = 0;
+    float shownOffset = 0.0f;
+};
+
+/// A dropped modulator that could mean several parameters (an envelope corner, an EQ node, a partial...):
+/// ask which one, then link it.
+inline void chooseAndLink (juce::Component& c, std::vector<std::pair<juce::String, juce::RangedAudioParameter*>> options, int mod)
+{
+    juce::PopupMenu m;
+    m.addSectionHeader ("Modulator " + juce::String (mod) + " controls:");
+    for (size_t i = 0; i < options.size(); ++i) m.addItem ((int) i + 1, options[i].first);
+    juce::Component::SafePointer<juce::Component> safe (&c);
+    m.showMenuAsync (juce::PopupMenu::Options(), [safe, options, mod] (int r) {
+        if (safe == nullptr || r <= 0) return;
+        if (auto* h = findModHandler (safe.getComponent())) h->modDroppedOn (*options[(size_t) r - 1].second, mod);
+    });
+}
+inline int modOfDrag (const juce::DragAndDropTarget::SourceDetails& d)
+{
+    return d.description.toString().fromFirstOccurrenceOf ("mod:", false, false).getIntValue();
 }
 
 /// Label line above a control (unless compact); trims it off `b`.
@@ -41,7 +142,7 @@ inline void drawControlLabel (juce::Graphics& g, juce::Rectangle<int>& b, const 
     b.removeFromTop (3);
 }
 
-class ScrubBox : public juce::Component, public juce::DragAndDropTarget, public juce::SettableTooltipClient, private juce::Timer
+class ScrubBox : public juce::Component, public juce::DragAndDropTarget, public juce::SettableTooltipClient, public ParamBound, private juce::Timer
 {
 public:
     ScrubBox (juce::RangedAudioParameter& p, juce::String labelText, int integerDigits, int decimalPlaces, double arrowStepSize = 1.0)
@@ -64,7 +165,6 @@ public:
         editor.onEscapeKey = [this] { editor.setVisible (false); };
         editor.onFocusLost = [this] { commitText(); };
         addChildComponent (editor);
-        isFloat = dynamic_cast<juce::AudioParameterFloat*> (&param) != nullptr; // only floats can be modulated
         startTimerHz (20);
     }
 
@@ -72,7 +172,13 @@ public:
     void setCompact (bool c) { compact = c; resized(); repaint(); }
 
     // ---- modulation: a modulator chip dropped here links it to this parameter -------------------
-    bool isInterestedInDragSource (const SourceDetails& d) override { return isFloat && d.description.toString().startsWith ("mod:"); }
+    bool usesParam (const juce::String& id) const override { return param.getParameterID() == id; }
+    bool isInterestedInDragSource (const SourceDetails& d) override
+    {
+        if (! d.description.toString().startsWith ("mod:")) return false;
+        auto* h = findModHandler (this);
+        return h == nullptr || h->canModulate (param);
+    }
     void itemDragEnter (const SourceDetails&) override { dropHover = true; repaint(); }
     void itemDragExit (const SourceDetails&) override { dropHover = false; repaint(); }
     void itemDropped (const SourceDetails& d) override
@@ -113,7 +219,10 @@ public:
             g.setColour (theme::modified);
             g.setFont (theme::mono (11.0f));
             if (! compact)
-                g.drawText ("~" + nums, juce::Rectangle<int> (box.getX(), getLocalBounds().getY(), box.getWidth(), kLabelH), juce::Justification::centredRight, false);
+            {   // right after the label text (so a long label isn't overprinted)
+                const int lw = (int) std::ceil (juce::GlyphArrangement::getStringWidth (theme::sans (12.5f), label)) + 8;
+                g.drawText ("~" + nums, juce::Rectangle<int> (box.getX() + lw, getLocalBounds().getY(), 60, kLabelH), juce::Justification::centredLeft, false);
+            }
             auto bar = juce::Rectangle<float> ((float) box.getX() + 1.0f, (float) box.getBottom() - 4.0f, (float) (box.getWidth() - kArrowW - 2), 3.0f);
             const float base = param.getValue(), now = juce::jlimit (0.0f, 1.0f, base + shownOffset);
             g.setColour (theme::mix (0.15f));
@@ -240,7 +349,7 @@ private:
 
     void timerCallback() override
     {
-        if (! isVisible() || ! isFloat) return;
+        if (! isVisible()) return;
         if (handler == nullptr) handler = findModHandler (this);
         const unsigned mask = handler != nullptr ? handler->modMaskFor (param) : 0u;
         const float off = mask != 0 ? handler->modOffsetNorm (param) : 0.0f;
@@ -335,7 +444,7 @@ private:
     juce::ParameterAttachment attachment;
     juce::TextEditor editor;
     int hoverChar = -1, hoverArrow = 0, dragPlace = kNoPlace;
-    bool compact = false, isFloat = false, dropHover = false;
+    bool compact = false, dropHover = false;
     ModDropHandler* handler = nullptr;
     unsigned shownMask = 0;
     float shownOffset = 0.0f;
@@ -344,12 +453,13 @@ private:
     float dragAccum = 0.0f, lastY = 0.0f;
 };
 
-class SegmentedToggle : public juce::Component, public juce::SettableTooltipClient
+class SegmentedToggle : public juce::Component, public juce::SettableTooltipClient, public ModAware, public ParamBound
 {
 public:
     void setCompact (bool c) { compact = c; repaint(); }
+    bool usesParam (const juce::String& id) const override { return param.getParameterID() == id; }
     SegmentedToggle (juce::RangedAudioParameter& p, juce::String labelText, juce::String offText, juce::String onText)
-        : param (p), label (std::move (labelText)), texts { std::move (offText), std::move (onText) },
+        : ModAware (this), param (p), label (std::move (labelText)), texts { std::move (offText), std::move (onText) },
           attachment (p, [this] (float) { repaint(); }, nullptr)
     {
         attachment.sendInitialUpdate();
@@ -360,6 +470,7 @@ public:
         auto b = getLocalBounds();
         drawControlLabel (g, b, label, compact);
         b = b.withHeight (juce::jmin (b.getHeight(), 28));
+        const auto overlayBox = b;
         const bool on = param.getValue() > 0.5f;
         for (int i = 0; i < 2; ++i)
         {
@@ -373,6 +484,7 @@ public:
             g.setFont (theme::sans (14.0f));
             g.drawText (texts[i], cell, juce::Justification::centred);
         }
+        paintModOverlay (g, overlayBox);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -381,6 +493,8 @@ public:
         attachment.setValueAsCompleteGesture (clickedOn ? 1.0f : 0.0f);
     }
 
+protected:
+    juce::RangedAudioParameter* modParamAt (juce::Point<int>) override { return &param; }
 private:
     bool compact = false;
     juce::RangedAudioParameter& param;
@@ -389,12 +503,13 @@ private:
     juce::ParameterAttachment attachment;
 };
 /// N-way segmented switch for a choice (or int) parameter: ArtHar's "Seed | Hand" style.
-class SegmentedChoice : public juce::Component, public juce::SettableTooltipClient
+class SegmentedChoice : public juce::Component, public juce::SettableTooltipClient, public ModAware, public ParamBound
 {
 public:
     void setCompact (bool c) { compact = c; repaint(); }
+    bool usesParam (const juce::String& id) const override { return param.getParameterID() == id; }
     SegmentedChoice (juce::RangedAudioParameter& p, juce::String labelText, juce::StringArray optionNames)
-        : param (p), label (std::move (labelText)), names (std::move (optionNames)),
+        : ModAware (this), param (p), label (std::move (labelText)), names (std::move (optionNames)),
           attachment (p, [this] (float) { repaint(); }, nullptr)
     {
         attachment.sendInitialUpdate();
@@ -405,6 +520,7 @@ public:
         auto b = getLocalBounds();
         drawControlLabel (g, b, label, compact);
         b = b.withHeight (juce::jmin (b.getHeight(), 28));
+        const auto overlayBox = b;
         const int sel = index();
         const int n = names.size();
         for (int i = 0; i < n; ++i)
@@ -418,6 +534,7 @@ public:
             g.setFont (theme::sans (13.0f));
             g.drawFittedText (names[i], cell.reduced (3, 0), juce::Justification::centred, 1, 0.8f);
         }
+        paintModOverlay (g, overlayBox);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -428,6 +545,8 @@ public:
         attachment.setValueAsCompleteGesture ((float) (param.getNormalisableRange().start + (float) i));
     }
 
+protected:
+    juce::RangedAudioParameter* modParamAt (juce::Point<int>) override { return &param; }
 private:
     int index() const { return juce::roundToInt (param.convertFrom0to1 (param.getValue()) - param.getNormalisableRange().start); }
     bool compact = false;
@@ -438,12 +557,13 @@ private:
 };
 
 /// Dropdown for a choice parameter with many options (ArtHar combo style: "Dissonance curve ▼").
-class ChoiceBox : public juce::Component, public juce::SettableTooltipClient
+class ChoiceBox : public juce::Component, public juce::SettableTooltipClient, public ModAware, public ParamBound
 {
 public:
     void setCompact (bool c) { compact = c; repaint(); }
+    bool usesParam (const juce::String& id) const override { return param.getParameterID() == id; }
     ChoiceBox (juce::RangedAudioParameter& p, juce::String labelText, juce::StringArray optionNames)
-        : param (p), label (std::move (labelText)), names (std::move (optionNames)),
+        : ModAware (this), param (p), label (std::move (labelText)), names (std::move (optionNames)),
           attachment (p, [this] (float) { repaint(); }, nullptr)
     {
         attachment.sendInitialUpdate();
@@ -455,6 +575,7 @@ public:
         auto b = getLocalBounds();
         drawControlLabel (g, b, label, compact);
         b = b.withHeight (juce::jmin (b.getHeight(), 28));
+        const auto overlayBox = b;
         g.setColour (theme::boxFill());
         g.fillRect (b);
         g.setColour (isMouseOver() ? theme::mix (0.4f) : theme::frame());
@@ -467,6 +588,7 @@ public:
         tri.addTriangle (a.getX(), a.getY(), a.getRight(), a.getY(), a.getCentreX(), a.getBottom());
         g.setColour (theme::mix (0.6f));
         g.fillPath (tri);
+        paintModOverlay (g, overlayBox);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -481,6 +603,8 @@ public:
         });
     }
 
+protected:
+    juce::RangedAudioParameter* modParamAt (juce::Point<int>) override { return &param; }
 private:
     int index() const { return juce::jlimit (0, names.size() - 1, juce::roundToInt (param.convertFrom0to1 (param.getValue()) - param.getNormalisableRange().start)); }
     bool compact = false;
@@ -524,13 +648,13 @@ private:
 /// scrollable division, each with three versions: straight "4/16", triplet "4/16t", dotted "4/16.".
 /// Wheel or drag up/down over the division steps through the list; the three flavour cells pick the version.
 /// Bound to three parameters: sync (bool), the Hz/ms value (float), the division (choice; index = base*3 + flavour).
-class RateControl : public juce::Component, public juce::SettableTooltipClient
+class RateControl : public juce::Component, public juce::SettableTooltipClient, public ModAware, public ParamBound
 {
 public:
     /// `divisionNames` = the choice parameter's names (base names are derived as "every third, without the t / .").
     RateControl (juce::RangedAudioParameter& syncParam, juce::RangedAudioParameter& valueParam, juce::RangedAudioParameter& beatParam,
                  juce::String labelText, int valueIntDigits, int valueDecimals, double valueStep, juce::String unit = "Hz", bool compactLayout = false)
-        : sync (syncParam), beat (beatParam), label (std::move (labelText)), unitText (std::move (unit)), compact (compactLayout),
+        : ModAware (this), sync (syncParam), beat (beatParam), label (std::move (labelText)), unitText (std::move (unit)), compact (compactLayout),
           valueBox (valueParam, "", valueIntDigits, valueDecimals, valueStep),
           syncAttachment (syncParam, [this] (float) { updateMode(); }, nullptr),
           beatAttachment (beatParam, [this] (float) { repaint(); }, nullptr)
@@ -547,6 +671,10 @@ public:
     void setHelp (const juce::String& t) { setTooltip (t); valueBox.setTooltip (t); }
 
     void resized() override { valueBox.setBounds (mainArea()); }
+    bool usesParam (const juce::String& id) const override
+    {
+        return sync.getParameterID() == id || beat.getParameterID() == id || valueBox.usesParam (id);
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -567,6 +695,7 @@ public:
             g.setFont (theme::sans (12.5f));
             g.drawText (i == 0 ? unitText : "BPM", cell, juce::Justification::centred);
         }
+        paintModOverlay (g, toggleArea(), false);
         if (! bpm) return;
         // Division box.
         auto box = mainArea();
@@ -587,6 +716,7 @@ public:
             g.setFont (theme::sans (15.0f, sel));
             g.drawText (marks[f], cell, juce::Justification::centred);
         }
+        if (hover == &beat) { g.setColour (theme::modified); g.drawRect (mainArea(), 2); }
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -623,6 +753,15 @@ public:
         if (juce::exactlyEqual (d, 0.0f)) return;
         setIndex (juce::jlimit (0, numBases() - 1, base() + (d > 0 ? 1 : -1)) * 3 + flavour(), true);
     }
+
+protected:
+    /// The BPM switch = the sync parameter; the division box (in BPM mode) = the division parameter.
+    juce::RangedAudioParameter* modParamAt (juce::Point<int> p) override
+    {
+        if (toggleArea().contains (p)) return &sync;
+        return isBpm() && mainArea().contains (p) ? &beat : nullptr;
+    }
+    juce::RangedAudioParameter* primaryModParam() override { return isBpm() ? &beat : &sync; }
 
 private:
     static constexpr int kFlavourW = 17, kToggleW = 50;

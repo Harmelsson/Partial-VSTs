@@ -44,6 +44,8 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterInt> (L, ParameterID { ids::edoSteps, 7 }, "EDO steps", 1, 120, 12);
     // v0.6: freeze the current scale. The notes stay while seed / partials / method change.
     add<AudioParameterBool> (L, ParameterID { ids::scaleLock, 7 }, "Scale lock", false);
+    // v0.7: freeze the partials (seed stretch, rolloff, count) so the timbre stays while the seed moves.
+    add<AudioParameterBool> (L, ParameterID { ids::partialsLock, 8 }, "Partials lock", false);
     add<AudioParameterFloat> (L, ParameterID { ids::minDip, v2 }, "Min dip strength", NormalisableRange<float> (0.0f, 50.0f, 0.0f), 2.0f, fmt (1, "%"));
     add<AudioParameterFloat> (L, ParameterID { ids::tolerance, v3 }, "Consonance tolerance", NormalisableRange<float> (0.5f, 30.0f, 0.0f), 5.0f, fmt (1, "c"));
     add<AudioParameterInt> (L, ParameterID { ids::minShared, v3 }, "Min shared partials", 1, 8, 2);
@@ -212,6 +214,12 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         if (m <= kLegacyMods)
             add<AudioParameterChoice> (L, ParameterID { ids::modDiv (m), 6 }, "Mod " + String (m) + " division (old)", syncDivNames(), 2);
         add<AudioParameterChoice> (L, ParameterID { ids::modBeat (m), v7 }, "Mod " + String (m) + " division", beatNames(), kBeatDefaultBar);
+        // v0.7: trigger. Never = free-running; MIDI = restarts on every note-on; Audio = restarts when the level
+        // of the chosen source rises through the threshold.
+        add<AudioParameterChoice> (L, ParameterID { ids::modTrig (m), 8 }, "Mod " + String (m) + " trigger", trigNames(), 0);
+        add<AudioParameterFloat> (L, ParameterID { ids::modThr (m), 8 }, "Mod " + String (m) + " audio threshold", NormalisableRange<float> (-60.0f, 0.0f, 0.0f), -24.0f, fmt (1, "dB"));
+        add<AudioParameterChoice> (L, ParameterID { ids::modSrc (m), 8 }, "Mod " + String (m) + " audio source", trigSourceNames(), 1);
+        add<AudioParameterBool> (L, ParameterID { ids::modLoop (m), 8 }, "Mod " + String (m) + " loop", true);
     }
 
     // 5-band EQ (per voice, before the FX rack). Bands start switched off.

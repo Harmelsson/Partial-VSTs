@@ -1,6 +1,13 @@
 #include "PluginEditor.h"
 #include "xen/Stretch.h"
 
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#endif
+
 namespace th = pvst::theme;
 using namespace seed;
 
@@ -15,12 +22,12 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
       minSharedBox (p (ids::minShared), "Min shared", 1, 0, 1.0),
       edoStepsBox (p (ids::edoSteps), "Steps", 3, 0, 1.0),
       methodBox (p (ids::method), "Scale method", seed::methodNames()),
-      modPanel (pr)
+      modPanel (pr, [this] (const juce::String& id) { locateParam (id); })
 {
     for (juce::Component* c : std::initializer_list<juce::Component*> {
              &prevPreset, &presetName, &nextPreset, &savePreset, &scopeBtn, &fundamentalBox, &seedBox, &partialsBox,
              &rolloffBox, &methodBox, &minDipBox, &toleranceBox, &minSharedBox, &edoStepsBox, &lockScale, &resetEdits,
-             &diceTuning, &curvePlot, &partialsPlot, &scaleTable, &partialsTable, &dicePage, &mutatePage, &resetPage,
+             &diceTuning, &lockPartials, &scaleDown, &scaleLabel, &scaleUp, &curvePlot, &partialsPlot, &scaleTable, &partialsTable, &dicePage, &mutatePage, &resetPage,
              &initAll, &importScl, &exportScl, &fitSeed, &modPanel })
         addAndMakeVisible (c);
 
@@ -32,6 +39,19 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
     methodBox.setTooltip ("How the scale's notes are found: Dissonance / Consonance = calculated from the partials; Imported = a Scala file; EDO = N equal steps of 1200 cents; Seed-EDO = N equal steps of the seed's 'octave'.");
     lockScale.setTooltip ("Freeze the scale: the notes stay exactly where they are while you change the seed, partials or method. The curve keeps updating so you can see the locked notes against the new sound. Unlocking recalculates the scale (you are asked first).");
     lockScale.onClick = [this] { onLockClicked(); };
+    lockPartials.setTooltip ("Freeze the partials (seed stretch, rolloff and count): the timbre stays exactly as it is while you change the seed or rolloff. The seed then only sets the 'octave' / scale period. Hand edits still apply on top. Unlocking recalculates the partials (you are asked first).");
+    lockPartials.onClick = [this] { onLockPartialsClicked(); };
+    // Window scale (25..200 %).
+    scaleDown.setTooltip ("Smaller window"); scaleUp.setTooltip ("Bigger window"); scaleLabel.setTooltip ("Window size 25-200 % (click for a list)");
+    scaleDown.onClick = [this] { static const int steps[] = { 25, 33, 40, 50, 60, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200 }; int cur = proc.uiScale(), next = 25; for (int v : steps) if (v < cur) next = v; changeScale (next); };
+    scaleUp.onClick = [this] { static const int steps[] = { 25, 33, 40, 50, 60, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200 }; int cur = proc.uiScale(), next = 200; for (int i = (int) std::size (steps) - 1; i >= 0; --i) if (steps[i] > cur) next = steps[i]; changeScale (next); };
+    scaleLabel.onClick = [this] {
+        juce::PopupMenu m;
+        for (int v : { 25, 33, 40, 50, 60, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200 }) m.addItem (v, juce::String (v) + " %", true, v == proc.uiScale());
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&scaleLabel), [this] (int r) { if (r > 0) changeScale (r); });
+    };
+    scaleLabel.setText (juce::String (proc.uiScale()) + "%");
+    addMouseListener (this, true); // to hand the keyboard back to the host after a click (mouseUp)
 
     // ---- Scala ---------------------------------------------------------------------------------
     // Import = load a .scl as the scale (method -> Imported; the partials stay yours, the curve shows
@@ -134,6 +154,8 @@ SeedEditor::SeedEditor (SeedProcessor& pr)
     showTab (0);
 
     setSize (kMainW + kModW + 12, 960);
+    addAndMakeVisible (glow); // last = on top
+    setScaleFactor ((float) proc.uiScale() / 100.0f);
     lastTick = juce::Time::getMillisecondCounterHiRes();
     timerCallback();
     startTimerHz (60);
@@ -167,6 +189,99 @@ void SeedEditor::onLockClicked()
 void SeedEditor::modDroppedOn (juce::RangedAudioParameter& prm, int mod)
 {
     proc.addModLink (mod, prm.getParameterID(), 100.0f);
+}
+
+void SeedEditor::onLockPartialsClicked()
+{
+    if (! proc.partialsLocked()) { proc.setPartialsLocked (true); return; }
+    juce::Component::SafePointer<SeedEditor> safe (this);
+    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                      .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                      .withTitle ("Unlock the partials?")
+                                      .withMessage ("The partials will change.\n\nUnlocking recalculates them from the current seed, rolloff and partial count, "
+                                                    "so the timbre you have now will be replaced.")
+                                      .withButton ("Unlock")
+                                      .withButton ("Keep locked")
+                                      .withAssociatedComponent (this),
+                                  [safe] (int result) { if (safe != nullptr && result == 1) safe->proc.setPartialsLocked (false); });
+}
+
+void SeedEditor::changeScale (int percent)
+{
+    percent = juce::jlimit (25, 200, percent);
+    proc.setUiScale (percent);
+    scaleLabel.setText (juce::String (percent) + "%");
+    setScaleFactor ((float) percent / 100.0f);
+}
+
+/// Windows / FL Studio: a click inside a plugin window leaves the keyboard focus on the plugin's own window,
+/// so FL's typing-keyboard-as-piano stops working until you click FL's window border. After a click we hand
+/// the focus back to the window that contains the plugin (what clicking its border does) unless we are
+/// typing into one of our own text boxes or a menu / dialog is open.
+void SeedEditor::mouseUp (const juce::MouseEvent&) { releaseFocusToHost(); }
+
+void SeedEditor::releaseFocusToHost()
+{
+#if JUCE_WINDOWS
+    juce::Component::SafePointer<SeedEditor> safe (this);
+    juce::Timer::callAfterDelay (120, [safe] {
+        if (safe == nullptr) return;
+        if (dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent()) != nullptr) return;
+        if (juce::ModalComponentManager::getInstance()->getNumModalComponents() > 0) return;
+        auto& desktop = juce::Desktop::getInstance();
+        for (int i = 0; i < desktop.getNumComponents(); ++i)
+            if (auto* c = desktop.getComponent (i); c != nullptr && c->getName() == "menu" && c->isVisible()) return; // a popup menu is open
+        if (auto* peer = safe->getPeer())
+            if (auto* hwnd = (HWND) peer->getNativeHandle())
+                if (auto* root = ::GetAncestor (hwnd, GA_ROOT); root != nullptr && root != hwnd) ::SetFocus (root);
+    });
+#endif
+}
+
+// ================================================================================================
+// "Where is this control?" (click a modulator link): open its tab, scroll to it, light it up.
+// ================================================================================================
+static juce::Component* findBoundControl (juce::Component& parent, const juce::String& id)
+{
+    for (auto* c : parent.getChildren())
+    {
+        if (auto* pb = dynamic_cast<pvst::ParamBound*> (c); pb != nullptr && pb->usesParam (id)) return c;
+        if (auto* deeper = findBoundControl (*c, id)) return deeper;
+    }
+    return nullptr;
+}
+
+void SeedEditor::locateParam (const juce::String& id)
+{
+    auto isNum = [] (const juce::String& t) { return t.isNotEmpty() && t.containsOnly ("0123456789"); };
+    // FX slot / EQ band: select it first so its controls exist.
+    if (id.startsWith ("fx") && isNum (id.substring (2, 3)) && fxPage != nullptr) { showTab (3); fxPage->rack.selectSlot (id.substring (2).getIntValue()); }
+    else if (id.startsWith ("eq") && isNum (id.substring (2, 3)) && fxPage != nullptr) { showTab (3); fxPage->eq.selectBand (id.substring (2).getIntValue()); }
+
+    juce::Component* target = findBoundControl (*this, id);
+    // Things without a control of their own live in the plots / tables.
+    if (target == nullptr)
+    {
+        const auto tail3 = id.length() > 3 ? id.substring (id.length() - 3) : juce::String();
+        if (id.startsWith ("cp")) target = id.endsWith ("scl") ? static_cast<juce::Component*> (&partialsTable) : &partialsPlot;
+        else if (id.startsWith ("cn")) target = &curvePlot;
+        else if (id.startsWith ("p") && isNum (id.substring (1, 2)) && (id.endsWith ("lvl") || id.endsWith ("pos"))) target = &partialsPlot;
+        else if (id.startsWith ("p") && isNum (id.substring (1, 2)) && tail3 == "scl") target = &partialsTable;
+        else if (id.startsWith ("n") && isNum (id.substring (1, 2))) target = id.endsWith ("on") ? static_cast<juce::Component*> (&scaleTable) : &curvePlot;
+    }
+    if (target == nullptr) return;
+    for (int t = 0; t < kTabs; ++t) if (pages[(size_t) t].isParentOf (target)) showTab (t);
+    // Scroll any viewport the control sits in so it is on screen.
+    for (auto* vp = target->findParentComponentOfClass<juce::Viewport>(); vp != nullptr; vp = vp->findParentComponentOfClass<juce::Viewport>())
+    {
+        if (auto* viewed = vp->getViewedComponent())
+        {
+            const auto pos = viewed->getLocalPoint (target, juce::Point<int> (0, 0));
+            if (pos.y < vp->getViewPositionY() || pos.y + target->getHeight() > vp->getViewPositionY() + vp->getViewHeight())
+                vp->setViewPosition (0, juce::jmax (0, pos.y - 12));
+        }
+    }
+    glow.flash (getLocalArea (target, target->getLocalBounds()));
 }
 
 void SeedEditor::refreshPresetLabel()
@@ -237,11 +352,11 @@ void SeedEditor::wireCalculatorEditing()
         if (std::abs (cents - m.cents) > 1e-6 && posId.isNotEmpty())
         {
             if (m.custom) setParam (posId, cents);
-            else setParam (posId, cents - 1200.0 * xen::stretchFactor (st.seed) * std::log2 ((double) m.index + 1));
+            else setParam (posId, cents - 1200.0 * xen::stretchFactor (st.partialSeed()) * std::log2 ((double) m.index + 1));
         }
         if (std::abs (amp - std::min (1.0, m.amp)) > 1e-6)
         {
-            const double base = m.custom ? 1.0 : xen::rolloffShape (m.index + 1, st.rolloff);
+            const double base = m.custom ? 1.0 : xen::rolloffShape (m.index + 1, st.partialRolloff());
             setParam (lvlId, amp <= 1e-4 ? xen::kMuteDb : 20.0 * std::log10 (amp / base));
         }
     };
@@ -255,6 +370,28 @@ void SeedEditor::wireCalculatorEditing()
         juce::String posId, lvlId; partialIds (m, posId, lvlId);
         if (m.custom) { setParam (ids::customPartialOn (m.index - xen::kSeriesPartials + 1), 0.0); return; }
         setParam (lvlId, m.amp > 0.0 ? xen::kMuteDb : 0.0);
+    };
+    // A modulator chip dropped on a note / partial / tick (v0.7: everything you can edit with the mouse can be modulated).
+    curvePlot.onModDrop = [this] (const xen::FinalNote& n, int mod) {
+        if (n.custom) pvst::chooseAndLink (curvePlot, { { "Custom note: position", &p (ids::customNoteCents (-n.degree)) }, { "Custom note: on / off", &p (ids::customNoteOn (-n.degree)) } }, mod);
+        else if (n.degree >= 1 && n.degree <= xen::kEditableDegrees)
+            pvst::chooseAndLink (curvePlot, { { "Note " + juce::String (n.degree) + ": position", &p (ids::noteOffset (n.degree)) }, { "Note " + juce::String (n.degree) + ": on / off", &p (ids::noteOn (n.degree)) } }, mod);
+    };
+    scaleTable.onModDrop = [this] (const xen::FinalNote& n, int mod) {
+        if (n.custom) proc.addModLink (mod, ids::customNoteOn (-n.degree));
+        else if (n.degree >= 1 && n.degree <= xen::kEditableDegrees) proc.addModLink (mod, ids::noteOn (n.degree));
+    };
+    partialsPlot.onModDrop = [this] (const xen::ModelPartial& m, int mod) {
+        if (m.custom)
+        {
+            const int k = m.index - xen::kSeriesPartials + 1;
+            pvst::chooseAndLink (partialsPlot, { { "Custom partial " + juce::String (k) + ": position", &p (ids::customPartialCents (k)) }, { "Custom partial " + juce::String (k) + ": loudness", &p (ids::customPartialLevel (k)) } }, mod);
+        }
+        else if (m.index == 0) proc.addModLink (mod, ids::partialLevel (1));
+        else pvst::chooseAndLink (partialsPlot, { { "Partial " + juce::String (m.index + 1) + ": loudness", &p (ids::partialLevel (m.index + 1)) }, { "Partial " + juce::String (m.index + 1) + ": position", &p (ids::partialPos (m.index + 1)) } }, mod);
+    };
+    partialsTable.onModDrop = [this] (const xen::ModelPartial& m, int mod) {
+        proc.addModLink (mod, m.custom ? ids::customPartialInScale (m.index - xen::kSeriesPartials + 1) : ids::partialInScale (m.index + 1));
     };
     partialsPlot.onAdd = [this] (double cents, double amp) {
         for (int k = 1; k <= xen::kCustomPartials; ++k)
@@ -315,7 +452,6 @@ void SeedEditor::buildPages()
     };
 
     auto& keys = pages[0];
-    seg (keys, ids::keyMode, "Key mode (how keys become pitches)", keyModeNames(), 330);
     {
         auto c = std::make_unique<pvst::ScrubBox> (p (ids::baseKey), "Base key (plays the unison)", 3, 0, 1.0);
         c->suffix = [] (double n) { return juce::MidiMessage::getMidiNoteName (juce::roundToInt (n), true, true, 4); };
@@ -324,7 +460,6 @@ void SeedEditor::buildPages()
         keys.add (*c, 190);
         owned.push_back (std::move (c));
     }
-    box (keys, ids::magnet, "Magnet (%)", 3, 0, 5.0);
     box (keys, ids::life, "Life (%)", 3, 0, 5.0);
     box (keys, ids::glide, "Glide (ms)", 4, 0, 10.0);
     box (keys, ids::velocity, "Velocity (%)", 3, 0, 5.0);
@@ -469,37 +604,17 @@ void SeedEditor::timerCallback()
         curvePlot.setEmphasis (emphasis);
     }
 
-    // Where the keys land for the chosen key mode (v0.5). Key C4 (60) = the unison, except in
-    // 12-EDO where keys keep their normal pitches (so the unison sits wherever the Fundamental is).
+    // Where the keys land (v0.5, simplified in v0.7: the keyboard always plays the scale). The base key
+    // (default C4 = 60) = the unison; each key above is the next note of the scale, wrapping every period.
     {
-        const int keyMode = (int) std::lround (p (ids::keyMode).convertFrom0to1 (p (ids::keyMode).getValue()));
         const double per = fin.valid ? fin.period : std::abs (xen::periodCents (settings.seed));
-        const double edoOffset = 1200.0 * std::log2 (seed::kC4 / settings.fundamentalHz); // C4 relative to the unison
         std::array<double, xen::kMaxFinalNotes> pc {}, pst {};
         const int np = fin.valid ? fin.playable (pc.data(), pst.data(), (int) pc.size()) : 0;
         const int baseKey = (int) std::lround (p (ids::baseKey).convertFrom0to1 (p (ids::baseKey).getValue()));
-        const double magnet = p (ids::magnet).convertFrom0to1 (p (ids::magnet).getValue()) / 100.0;
         std::vector<pvst::CurvePlot::KeyMarker> km;
-        for (int k = 0; k < 40; ++k)
-        {
-            double c = 0.0;
-            if (keyMode == seed::Keys12) c = edoOffset + k * 100.0;
-            else if (keyMode == seed::KeysSeed12 || np == 0) c = k * per / 12.0;
-            else if (keyMode == seed::KeysScale) c = (k / np) * per + pc[(size_t) (k % np)];
-            else
-            {
-                const double base = k * per / 12.0, oct = std::floor (base / per), within = base - oct * per;
-                double best = 0.0, bestD = 1e18;
-                for (int i = 0; i <= np; ++i)
-                {
-                    const double nc = i < np ? pc[(size_t) i] : per;
-                    if (std::abs (nc - within) < bestD) { bestD = std::abs (nc - within); best = nc; }
-                }
-                c = base + magnet * (best - within);
-            }
-            km.push_back ({ c, juce::MidiMessage::getMidiNoteName ((keyMode == seed::Keys12 ? 60 : baseKey) + k, true, false, 4) });
-        }
-        curvePlot.setKeyMarkers (std::move (km), keyMode == seed::KeysSeed12 || keyMode == seed::KeysMagnet, edoOffset);
+        for (int k = 0; np > 0 && k < 40; ++k)
+            km.push_back ({ (k / np) * per + pc[(size_t) (k % np)], juce::MidiMessage::getMidiNoteName (baseKey + k, true, false, 4) });
+        curvePlot.setKeyMarkers (std::move (km), false, 0.0);
     }
     scaleTable.setEmphasis (emphasis);
 
@@ -516,7 +631,11 @@ void SeedEditor::timerCallback()
     const bool locked = proc.scaleLocked();
     curvePlot.setLocked (locked);
     lockScale.setActive (locked);
-    lockScale.setText (locked ? "LOCKED" : "Lock scale");
+    lockScale.setText (locked ? "SCALE LOCKED" : "Lock scale");
+    const bool pLocked = proc.partialsLocked();
+    partialsPlot.setLocked (pLocked);
+    lockPartials.setActive (pLocked);
+    lockPartials.setText (pLocked ? "PARTIALS LOCKED" : "Lock partials");
 
     const auto newInfo = "Stretch factor " + juce::String (xen::stretchFactor (settings.seed), 6)
                        + th::dot() + "\"octave\" " + juce::String (xen::periodCents (settings.seed), 4) + " cents"
@@ -550,7 +669,7 @@ void SeedEditor::paint (juce::Graphics& g)
     g.setColour (th::mix (0.4f));
     g.setFont (th::sans (11.5f));
     const juce::String ver = juce::String ("v") + kVersion + th::dot() + "build " + PVST_BUILD_NUMBER + th::dot() + PVST_GIT_HASH;
-    g.drawText (ver, juce::Rectangle<int> (14, 0, kMainW - 28, 46), juce::Justification::centredRight);
+    g.drawText (ver, juce::Rectangle<int> (14, 2, kMainW - 28, 20), juce::Justification::centredRight);
 
     auto calcInner = th::drawSection (g, calcArea, "Calculator");
     g.setColour (th::dim());
@@ -579,6 +698,13 @@ void SeedEditor::resized()
     scopeBtn.setBounds (header.removeFromLeft (110));
     header.removeFromLeft (6);
     initAll.setBounds (header.removeFromLeft (60));
+    {   // window scale, left of the version text
+        auto sc = juce::Rectangle<int> (kMainW - 14 - 108, 22, 108, 22);
+        scaleDown.setBounds (sc.removeFromLeft (24)); sc.removeFromLeft (2);
+        scaleLabel.setBounds (sc.removeFromLeft (56)); sc.removeFromLeft (2);
+        scaleUp.setBounds (sc.removeFromLeft (24));
+    }
+    glow.setBounds (getLocalBounds());
 
     calcArea = b.removeFromTop (100);
     layoutCalculatorRow();
@@ -624,12 +750,14 @@ void SeedEditor::layoutCalculatorRow()
     else if (edo) place (edoStepsBox, 80);
     else if (! imported) place (minDipBox, 90);
     auto buttons = calcArea.reduced (10, 0).withTrimmedTop (26).withHeight (48);
-    buttons = buttons.removeFromRight (310).withHeight (28).withY (buttons.getY() + 19);
-    diceTuning.setBounds (buttons.removeFromRight (96));
-    buttons.removeFromRight (8);
-    resetEdits.setBounds (buttons.removeFromRight (96));
-    buttons.removeFromRight (8);
-    lockScale.setBounds (buttons.removeFromRight (96));
+    buttons = buttons.removeFromRight (470).withHeight (28).withY (buttons.getY() + 19);
+    diceTuning.setBounds (buttons.removeFromRight (90));
+    buttons.removeFromRight (6);
+    resetEdits.setBounds (buttons.removeFromRight (90));
+    buttons.removeFromRight (6);
+    lockScale.setBounds (buttons.removeFromRight (112));
+    buttons.removeFromRight (6);
+    lockPartials.setBounds (buttons.removeFromRight (130));
     // Scala buttons: small, bottom-right, on the info line.
     auto sc = calcArea.reduced (10, 5).removeFromBottom (20).removeFromRight (300);
     fitSeed.setBounds (sc.removeFromRight (96));

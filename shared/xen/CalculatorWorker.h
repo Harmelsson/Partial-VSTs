@@ -38,13 +38,22 @@ struct CalculatorSettings
     PartialEdits edits;             // hand edits + custom partials (default = none)
     std::vector<double> imported;   // Imported method: cents, rising, no unison, last = period
     int edoSteps = 12;              // Edo / SeedEdo: number of equal steps (1..120)
+    // Lock partials (v0.7): the partial series (stretch, rolloff, count) is frozen at the locked values,
+    // whatever the seed / rolloff / partials settings do. The seed still sets the period (scale search range).
+    bool partialsLocked = false;
+    double lockedSeed = 2.0, lockedRolloff = 1.0;
+    int lockedCount = 16;
+    double partialSeed() const { return partialsLocked ? lockedSeed : seed; }
+    double partialRolloff() const { return partialsLocked ? lockedRolloff : rolloff; }
+    int partialCount() const { return partialsLocked ? lockedCount : partials; }
 
     bool operator== (const CalculatorSettings& o) const
     {
         auto eq = [] (double a, double b) { return juce::exactlyEqual (a, b); };
         if (! (eq (fundamentalHz, o.fundamentalHz) && eq (seed, o.seed) && partials == o.partials && eq (rolloff, o.rolloff)
                && eq (minStrength, o.minStrength) && method == o.method && eq (toleranceCents, o.toleranceCents)
-               && minShared == o.minShared && imported == o.imported && edoSteps == o.edoSteps))
+               && minShared == o.minShared && imported == o.imported && edoSteps == o.edoSteps && partialsLocked == o.partialsLocked
+               && eq (lockedSeed, o.lockedSeed) && eq (lockedRolloff, o.lockedRolloff) && lockedCount == o.lockedCount))
             return false;
         for (size_t i = 0; i < edits.levelDb.size(); ++i)
             if (! eq (edits.levelDb[i], o.edits.levelDb[i]) || ! eq (edits.posCents[i], o.edits.posCents[i]) || edits.inScale[i] != o.edits.inScale[i]) return false;
@@ -57,7 +66,7 @@ struct CalculatorSettings
     bool operator!= (const CalculatorSettings& o) const { return ! (*this == o); }
 
     /// The partials after edits (for display and for the synth).
-    std::vector<ModelPartial> modelPartials() const { return buildPartials (seed, partials, rolloff, edits); }
+    std::vector<ModelPartial> modelPartials() const { return buildPartials (partialSeed(), partialCount(), partialRolloff(), edits); }
 
     /// The partials that SHAPE THE SCALE as (Hz, loudness): silent ones and unticked ("sound
     /// only") ones are left out, like ArtHar.

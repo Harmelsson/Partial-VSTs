@@ -47,6 +47,8 @@ struct EngineParams
 {
     // Calculator (tuning) inputs.
     double seed = 2.0, rolloff = 1.0, fundamentalHz = kC4;
+    // The PARTIALS' stretch / rolloff (= seed / rolloff, unless "Lock partials" froze them). `partials` is the count.
+    double partialSeed = 2.0, partialRolloff = 1.0;
     int partials = 16;
     xen::PartialEdits edits;
     // Envelope + level.
@@ -254,6 +256,8 @@ private:
         auto& t = target;
         s.seed = smooth (s.seed, t.seed);
         s.rolloff = smooth (s.rolloff, t.rolloff);
+        s.partialSeed = smooth (s.partialSeed, t.partialSeed);
+        s.partialRolloff = smooth (s.partialRolloff, t.partialRolloff);
         s.fundamentalHz = smoothLog (s.fundamentalHz, t.fundamentalHz);
         s.partials = t.partials;
         for (size_t i = 0; i < t.edits.levelDb.size(); ++i)
@@ -385,7 +389,7 @@ private:
     void controlTick()
     {
         smoothAll();
-        const double S = xen::stretchFactor (std::max (1e-9, s.seed));
+        const double S = xen::stretchFactor (std::max (1e-9, s.partialSeed));
         const double twoPiOverSr = 2.0 * 3.141592653589793 / sr;
         const double fadeTop = 0.45 * sr, fadeBottom = 0.40 * sr;
 
@@ -435,7 +439,7 @@ private:
             {
                 const double pos = i == 0 ? 0.0 : s.edits.posCents[ii];
                 cents[ii] = 1200.0 * S * log2N[ii] + pos;
-                calcAmp[ii] = i < s.partials ? std::min (4.0, xen::rolloffShape (i + 1, s.rolloff) * xen::dbToGain (s.edits.levelDb[ii])) : 0.0;
+                calcAmp[ii] = i < s.partials ? std::min (4.0, xen::rolloffShape (i + 1, s.partialRolloff) * xen::dbToGain (s.edits.levelDb[ii])) : 0.0;
             }
             else
             {

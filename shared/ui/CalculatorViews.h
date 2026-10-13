@@ -14,6 +14,7 @@
 //   ScaleTable   on / note / cents / ratio / Hz / strength. Click the square = switch on/off.
 // Hand-modified things are drawn in theme::modified (orange). Numbers shown are exact; only the
 // drawing is eased/animated.
+#include "ui/Controls.h"
 #include "ui/SquareLattice.h"
 #include "xen/CalculatorWorker.h"
 
@@ -64,9 +65,11 @@ namespace detail
 } // namespace detail
 
 // ================================================================================================
-class CurvePlot : public juce::Component
+class CurvePlot : public juce::Component, public juce::DragAndDropTarget
 {
 public:
+    /// A modulator chip dropped on a scale note (v0.7).
+    std::function<void (const xen::FinalNote&, int mod)> onModDrop;
     std::function<void (const xen::FinalNote&)> onDragBegin, onDragEnd, onReset, onToggle;
     std::function<void (const xen::FinalNote&, double cents)> onDrag;
     std::function<void (double cents)> onAdd;
@@ -226,8 +229,8 @@ public:
             const float side = noteSide + 10.0f * e; // a played note's square grows
             g.setColour (theme::bg);
             g.fillRect (juce::Rectangle<float> (side, side).withCentre ({ x, y }));
-            g.setColour (col);
-            g.drawRect (juce::Rectangle<float> (side, side).withCentre ({ x, y }), 2.0f);
+            g.setColour (i == dropNote ? theme::modified : col);
+            g.drawRect (juce::Rectangle<float> (side, side).withCentre ({ x, y }), i == dropNote ? 3.0f : 2.0f);
             g.fillRect (juce::Rectangle<float> (juce::jmin (4.0f, noteSide * 0.3f) + 8.0f * e, juce::jmin (4.0f, noteSide * 0.3f) + 8.0f * e).withCentre ({ x, y }));
             if (! n.enabled)
             {
@@ -269,6 +272,22 @@ public:
         if (dragging && onDragEnd) onDragEnd (dragNote);
         dragging = false;
     }
+    bool isInterestedInDragSource (const SourceDetails& d) override
+    {
+        if (! d.description.toString().startsWith ("mod:")) return false;
+        const int i = noteAt ((float) d.localPosition.x);
+        return i >= 0 && scale.notes[(size_t) i].kind == xen::ScaleNote::Found;
+    }
+    void itemDragEnter (const SourceDetails& d) override { dropNote = noteAt ((float) d.localPosition.x); }
+    void itemDragMove (const SourceDetails& d) override { dropNote = noteAt ((float) d.localPosition.x); }
+    void itemDragExit (const SourceDetails&) override { dropNote = -1; }
+    void itemDropped (const SourceDetails& d) override
+    {
+        const int i = noteAt ((float) d.localPosition.x);
+        dropNote = -1;
+        if (i >= 0 && onModDrop) onModDrop (scale.notes[(size_t) i], modOfDrag (d));
+    }
+
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
         // Only a LEFT double-click adds (two quick middle-clicks used to add notes by accident).
@@ -301,19 +320,22 @@ private:
     double frameMax = 1800.0;
     float lastDt = 1.0f / 60.0f;
     bool busy = false, dragging = false, locked = false;
+    int dropNote = -1;
     xen::FinalNote dragNote;
     float dragStartX = 0.0f;
     double dragStartCents = 0.0;
 };
 
 // ================================================================================================
-class PartialsPlot : public juce::Component
+class PartialsPlot : public juce::Component, public juce::DragAndDropTarget
 {
 public:
+    std::function<void (const xen::ModelPartial&, int mod)> onModDrop; // a modulator chip dropped on a partial (v0.7)
     std::function<void (const xen::ModelPartial&)> onDragBegin, onDragEnd, onReset, onRightClick;
     std::function<void (const xen::ModelPartial&, double cents, double amp)> onDrag;
     std::function<void (double cents, double amp)> onAdd;
 
+    void setLocked (bool l) { locked = l; }
     void setPartials (const std::vector<xen::ModelPartial>& p, double seedValue, double fundamentalHz)
     {
         parts = p; seed = seedValue; fundamental = fundamentalHz;
@@ -346,6 +368,13 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto inner = theme::drawSection (g, getLocalBounds(), "Partials").toFloat();
+        if (locked)
+        {
+            const float tw = juce::GlyphArrangement::getStringWidth (theme::sans (11.5f).withExtraKerningFactor (0.22f), juce::String ("PARTIALS"));
+            g.setColour (theme::modified);
+            g.setFont (theme::sans (11.5f, true).withExtraKerningFactor (0.22f));
+            g.drawText ("PARTIALS LOCKED", juce::Rectangle<float> (9.0f + tw + 16.0f, 6.0f, 180.0f, 18.0f), juce::Justification::centredLeft);
+        }
         g.setColour (theme::dim());
         g.setFont (theme::sans (11.5f));
         g.drawText (theme::u8 ("drag = loudness / move  \xc2\xb7  dbl-click = add  \xc2\xb7  right-click = mute  \xc2\xb7  middle = undo edit"),
@@ -368,6 +397,13 @@ public:
         }
         lattice.paint (g, lastDt);
 
+        if (dropPartial >= 0 && (size_t) dropPartial < parts.size())
+        {
+            const auto& dp = parts[(size_t) dropPartial];
+            const float hx = xOf (cents[(size_t) dp.index]), hy = data.getBottom() - (float) juce::jlimit (0.0, 1.0, height[(size_t) dp.index]) * data.getHeight();
+            g.setColour (theme::modified);
+            g.drawRect (juce::Rectangle<float> (16.0f, 16.0f).withCentre ({ hx, hy }), 2.5f);
+        }
         // Markers: hollow orange squares on edited/custom partials, a small x on muted ones.
         for (auto& p : parts)
         {
@@ -415,6 +451,17 @@ public:
         if (dragging && onDragEnd) onDragEnd (dragPartial);
         dragging = false;
     }
+    bool isInterestedInDragSource (const SourceDetails& d) override { return d.description.toString().startsWith ("mod:") && partialAt ((float) d.localPosition.x) >= 0; }
+    void itemDragEnter (const SourceDetails& d) override { dropPartial = partialAt ((float) d.localPosition.x); }
+    void itemDragMove (const SourceDetails& d) override { dropPartial = partialAt ((float) d.localPosition.x); }
+    void itemDragExit (const SourceDetails&) override { dropPartial = -1; }
+    void itemDropped (const SourceDetails& d) override
+    {
+        const int i = partialAt ((float) d.localPosition.x);
+        dropPartial = -1;
+        if (i >= 0 && onModDrop) onModDrop (parts[(size_t) i], modOfDrag (d));
+    }
+
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
         const auto area = detail::plotArea (getLocalBounds());
@@ -444,16 +491,18 @@ private:
     std::array<bool, kSlots> first = [] { std::array<bool, kSlots> a {}; a.fill (true); return a; }();
     double frameMin = 0.0, frameMax = 7200.0;
     float lastDt = 1.0f / 60.0f;
-    bool dragging = false;
+    bool dragging = false, locked = false;
+    int dropPartial = -1;
     int axis = 0;
     xen::ModelPartial dragPartial;
     juce::Point<float> downPos;
 };
 
 // ================================================================================================
-class ScaleTable : public juce::Component
+class ScaleTable : public juce::Component, public juce::DragAndDropTarget
 {
 public:
+    std::function<void (const xen::FinalNote&, int mod)> onModDrop; // chip dropped on a row's on/off square (v0.7)
     std::function<void (const xen::FinalNote&)> onToggle, onReset;
 
     void setScale (const xen::FinalScale& s, double fundamentalHz, const juce::String& footer)
@@ -489,6 +538,7 @@ public:
             rows.push_back ({ row, i });
             const float e = (size_t) i < emphasis.size() ? emphasis[(size_t) i] : 0.0f;
             if (e > 0.01f) { g.setColour (theme::mix (0.22f * e)); g.fillRect (row); } // being played
+            if (i == dropRow) { g.setColour (theme::modified); g.drawRect (row, 2); }
             const bool mod = n.moved || n.custom || ! n.enabled;
             const auto textCol = ! n.enabled ? theme::mix (0.35f) : mod ? theme::modified : theme::text();
             if (n.kind == xen::ScaleNote::Found) ++found;
@@ -539,6 +589,23 @@ public:
         repaint();
     }
 
+    int rowAt (juce::Point<int> p) const
+    {
+        for (auto& [r, i] : rows)
+            if (r.contains (p) && (scale.notes[(size_t) i].kind == xen::ScaleNote::Found || scale.notes[(size_t) i].custom)) return i;
+        return -1;
+    }
+    bool isInterestedInDragSource (const SourceDetails& d) override { return d.description.toString().startsWith ("mod:") && rowAt (d.localPosition) >= 0; }
+    void itemDragEnter (const SourceDetails& d) override { dropRow = rowAt (d.localPosition); repaint(); }
+    void itemDragMove (const SourceDetails& d) override { const int r = rowAt (d.localPosition); if (r != dropRow) { dropRow = r; repaint(); } }
+    void itemDragExit (const SourceDetails&) override { dropRow = -1; repaint(); }
+    void itemDropped (const SourceDetails& d) override
+    {
+        const int i = rowAt (d.localPosition);
+        dropRow = -1; repaint();
+        if (i >= 0 && onModDrop) onModDrop (scale.notes[(size_t) i], modOfDrag (d));
+    }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         for (auto& [r, i] : rows)
@@ -555,7 +622,7 @@ private:
     static constexpr int kRowH = 19;
     xen::FinalScale scale;
     std::vector<float> emphasis;
-    int first = 0, maxRows = 1;
+    int first = 0, maxRows = 1, dropRow = -1;
     double fundamental = 261.63;
     juce::String footerText;
     std::vector<std::pair<juce::Rectangle<int>, int>> rows;
@@ -564,9 +631,10 @@ private:
 /// The calculator's partials as a table (ArtHar's PARTIALS table), with the SCALE tick column
 /// (ArtHar v1.15): ticked = the partial shapes the scale; unticked = "sound only" (played, but the
 /// scale ignores it). The fundamental is always in. Mouse wheel scrolls.
-class PartialsTable : public juce::Component
+class PartialsTable : public juce::Component, public juce::DragAndDropTarget
 {
 public:
+    std::function<void (const xen::ModelPartial&, int mod)> onModDrop; // chip dropped on a row's Scale tick (v0.7)
     std::function<void (const xen::ModelPartial&)> onToggleScale;
 
     void setPartials (const std::vector<xen::ModelPartial>& p, double fundamentalHz)
@@ -595,6 +663,7 @@ public:
             const auto& p = parts[(size_t) (first + r)];
             auto row = inner.removeFromTop (kRowH);
             rows.push_back ({ row, first + r });
+            if (first + r == dropRow) { g.setColour (theme::modified); g.drawRect (row, 2); }
             const bool mod = p.custom || p.moved || p.levelEdited;
             g.setColour (p.amp <= 0.0 ? theme::mix (0.35f) : mod ? theme::modified : theme::text());
             g.setFont (theme::sans (12.5f));
@@ -621,6 +690,23 @@ public:
         }
     }
 
+    int tickRowAt (juce::Point<int> p) const
+    {
+        for (auto& [r, i] : rows)
+            if (r.contains (p) && ! (! parts[(size_t) i].custom && parts[(size_t) i].index == 0)) return i; // the fundamental is always in
+        return -1;
+    }
+    bool isInterestedInDragSource (const SourceDetails& d) override { return d.description.toString().startsWith ("mod:") && tickRowAt (d.localPosition) >= 0; }
+    void itemDragEnter (const SourceDetails& d) override { dropRow = tickRowAt (d.localPosition); repaint(); }
+    void itemDragMove (const SourceDetails& d) override { const int r = tickRowAt (d.localPosition); if (r != dropRow) { dropRow = r; repaint(); } }
+    void itemDragExit (const SourceDetails&) override { dropRow = -1; repaint(); }
+    void itemDropped (const SourceDetails& d) override
+    {
+        const int i = tickRowAt (d.localPosition);
+        dropRow = -1; repaint();
+        if (i >= 0 && onModDrop) onModDrop (parts[(size_t) i], modOfDrag (d));
+    }
+
     void mouseDown (const juce::MouseEvent& e) override
     {
         for (auto& [r, i] : rows)
@@ -644,7 +730,7 @@ private:
     int visibleRows() const { return juce::jmax (1, (getHeight() - 6 - 18 - 18 - 16) / kRowH); }
     std::vector<xen::ModelPartial> parts;
     double fundamental = 261.63;
-    int first = 0;
+    int first = 0, dropRow = -1;
     std::vector<std::pair<juce::Rectangle<int>, int>> rows;
 };
 

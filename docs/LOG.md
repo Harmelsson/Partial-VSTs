@@ -272,3 +272,36 @@ appending to the list needed no migration and my migration would have broken Imp
 lesson added. The drop-target test caught nothing; the UI itself (drag with a real mouse) is untested
 headless — only the drop wiring and a screenshot were checked.
 
+## 2026-10-13 — session 2 (cont.) — user tested v0.6.0 (build 16) → v0.7.0
+**User (verbatim-ish):** "really good work so far". Feedback: draggable modulators should work on EVERYTHING that can be
+edited with the mouse. "What I wanted with the 12-EDO / Seed-12 thing: if I change to those I still only see the
+scale's notes on the curve window, not the selected ones — the visual should be totally dynamic. Now I notice the
+'Scale method' does that, but it also overwrites the selectables in Keys&Pitch which isn't logical. Only the scale
+method should remain, remove those selectables from Keys&Pitch." Modulators "exactly like PhasePlant or Serum": LFOs
+drawable, fine-editable, selectable grid with Shift+drag snapping; trigger options MIDI / Audio (settable threshold) /
+never; audio trigger on input, output or external sidechain. Clicking a listed modulator item (screenshot: "FX 4 squash
+makeup") should highlight the setting, open its tab and give a slight orange glow. A "lock partials" like "lock scale".
+Window can get too big: scale 25–200 %. "Instantly reactive even if my last click was inside the window? Now I have to click
+the upper border or out to FL to play sound from my laptop's keyboard." FX feedback comes later.
+
+**Done (v0.7.0):** see PLAYGROUND.md "v0.7.0 changes". Decisions / mechanisms:
+- Any `RangedAudioParameter` (not the two locks) is a link target; `ModAware` mixin gives every control kind drop
+  highlight + badge; plots/tables are DragAndDropTargets with callbacks that call `chooseAndLink` when an element has
+  several parameters. `effUI()` (atomic per-parameter offsets published by the audio thread, explicitly zeroed when a
+  link goes away) lets the message thread (calculator, note/partial edits) see modulated values.
+- Key mode forced to Scale in the processor; Rig in tests now uses EDO 12 (+ settle) for "normal keys".
+- LFO shape = `pvst::LfoShape` (≤ 64 points, per-segment bend), saved in state ("lfoShapes") and presets (lfoN attrs),
+  copied to the audio thread through a try-lock; `Modulator::restart()` + one-shot. Triggers are evaluated per audio
+  block (≈ 10 ms resolution). Audio sources: input / sidechain peaks of THIS block, output = previous block.
+- New optional buses "Input" and "Sidechain" (disabled by default). JUCE lays input and output buses over the SAME
+  channels, so with the main input off the sidechain is channels 0-1 (read before the output overwrites them).
+- Lock partials = snapshot of (seed, rolloff, count) only; `CalculatorSettings::partialSeed()/…` and
+  `EngineParams::partialSeed/partialRolloff` use it, everything else (period, Seed-EDO) keeps using the live seed.
+- Window scale = `AudioProcessorEditor::setScaleFactor` + remembered percent in a text file. UNTESTED inside FL.
+- Focus: Windows-only `SetFocus(GetAncestor(hwnd, GA_ROOT))` 120 ms after every mouse-up (skipped for text editors,
+  modal windows, popup menus named "menu"). UNTESTED in FL — if keys still don't reach FL, next idea is to forward
+  WM_KEYDOWN/UP to the root window or to map the typing keyboard to notes inside the editor.
+**Worked first try:** the whole rewrite compiled; 5 old tests needed updating for the key-mode removal (Rig default).
+**Failed on the way:** my sidechain test put the signal on channels 2-3 — JUCE shares channels between input and output
+buses (see above); a first version of the link-chip click ran `onLocate` after a right-click removal (guard `ignoreUp`).
+

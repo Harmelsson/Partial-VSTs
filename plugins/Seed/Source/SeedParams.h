@@ -16,7 +16,7 @@
 
 namespace seed
 {
-inline constexpr const char* kVersion = "0.6.0";
+inline constexpr const char* kVersion = "0.7.0";
 
 namespace ids
 {
@@ -79,6 +79,7 @@ namespace ids
     inline constexpr const char* baseKey = "baseKey";       // the MIDI key that plays the unison
     inline constexpr const char* scaleLock = "scaleLock";   // freeze the current scale (notes stay when the seed changes)
     inline constexpr const char* edoSteps = "edoSteps";     // EDO / Seed-EDO methods: number of equal steps (1..120)
+    inline constexpr const char* partialsLock = "partialsLock"; // v0.7: freeze seed/rolloff/count of the PARTIALS
     inline constexpr const char* shimmerBeat = "shimmerBeat";
     inline constexpr const char* wanderBeat = "wanderBeat";
 
@@ -98,6 +99,11 @@ namespace ids
     inline juce::String modDiv (int m) { return "mod" + juce::String (m) + "div"; }    // v0.5
     /// FX rack slot parameter (v0.5): fx(2, "mix") -> "fx2mix". Slots 1..kNumFx.
     inline juce::String fx (int slot, const char* name) { return "fx" + juce::String (slot) + name; }
+    // v0.7: LFO trigger settings per modulator
+    inline juce::String modTrig (int m) { return "mod" + juce::String (m) + "trig"; }  // Never / MIDI / Audio
+    inline juce::String modThr (int m) { return "mod" + juce::String (m) + "thr"; }    // audio trigger threshold (dB)
+    inline juce::String modSrc (int m) { return "mod" + juce::String (m) + "src"; }    // audio source: Input / Output / Sidechain
+    inline juce::String modLoop (int m) { return "mod" + juce::String (m) + "loop"; }  // loop (on) or one-shot (off)
     inline juce::String modBeat (int m) { return "mod" + juce::String (m) + "beat"; }  // v0.6 (replaces modDiv)
     /// 5-band EQ parameter (v0.6): eq(2, "freq") -> "eq2freq". Bands 1..kEqBands.
     inline juce::String eq (int band, const char* name) { return "eq" + juce::String (band) + name; }
@@ -190,6 +196,9 @@ inline const juce::StringArray& keyModeNames()
     static const juce::StringArray a { "12-EDO", "Seed-12", "Scale", "Magnet" };
     return a;
 }
+inline const juce::StringArray& trigNames() { static const juce::StringArray a { "Never", "MIDI", "Audio" }; return a; }
+inline const juce::StringArray& trigSourceNames() { static const juce::StringArray a { "Input", "Output", "Sidechain" }; return a; }
+inline constexpr int kShapeDrawn = 7;
 inline const juce::StringArray& eqSteepNames()
 {
     static const juce::StringArray a { "12 dB/oct", "24 dB/oct", "36 dB/oct", "48 dB/oct" };
@@ -209,7 +218,7 @@ inline const juce::StringArray& sendRuleNames()
 }
 inline const juce::StringArray& modShapeNames()
 {
-    static const juce::StringArray a { "Sine", "Triangle", "Saw", "Square", "S&H", "Smooth rnd", "Drift" };
+    static const juce::StringArray a { "Sine", "Triangle", "Saw", "Square", "S&H", "Smooth rnd", "Drift", "Drawn" };
     return a;
 }
 /// Modulation targets. Index 0 = none. The ID list must stay aligned with the names.
@@ -241,7 +250,7 @@ inline const juce::StringArray& modTargetIds()
 inline bool isTuningParam (const juce::String& id)
 {
     static const juce::StringArray core { ids::seed, ids::partials, ids::rolloff, ids::fundamental, ids::minDip,
-                                          ids::method, ids::tolerance, ids::minShared, ids::edoSteps, ids::scaleLock };
+                                          ids::method, ids::tolerance, ids::minShared, ids::edoSteps, ids::scaleLock, ids::partialsLock };
     if (core.contains (id)) return true;
     if (id.startsWith ("p") && id.endsWith ("scl")) return id.substring (1, id.length() - 3).containsOnly ("0123456789");
     // Generated edit IDs: p{n}lvl, p{n}pos, cp{k}*, n{d}on/off, cn{k}*.

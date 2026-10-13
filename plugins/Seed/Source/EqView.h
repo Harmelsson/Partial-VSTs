@@ -14,7 +14,7 @@
 #include "PluginProcessor.h"
 #include "ui/Controls.h"
 
-class EqView : public juce::Component
+class EqView : public juce::Component, public juce::DragAndDropTarget
 {
 public:
     explicit EqView (SeedProcessor& p) : proc (p) { rebuildSettings(); }
@@ -49,6 +49,25 @@ public:
     }
 
     void resized() override { layoutSettings(); }
+
+    /// Selects a band (used when a modulator link is clicked: show the control it drives).
+    void selectBand (int b) { select (juce::jlimit (1, seed::kEqBands, b)); }
+    int selectedBand() const { return selected; }
+
+    // A modulator chip dropped on a node: ask which of its settings.
+    bool isInterestedInDragSource (const SourceDetails& d) override { return d.description.toString().startsWith ("mod:") && displayArea().contains (d.localPosition) && nodeAt (d.localPosition.toFloat()) > 0; }
+    void itemDragEnter (const SourceDetails& d) override { dropBand = nodeAt (d.localPosition.toFloat()); }
+    void itemDragMove (const SourceDetails& d) override { dropBand = nodeAt (d.localPosition.toFloat()); }
+    void itemDragExit (const SourceDetails&) override { dropBand = -1; }
+    void itemDropped (const SourceDetails& d) override
+    {
+        const int b = nodeAt (d.localPosition.toFloat());
+        dropBand = -1;
+        if (b < 1) return;
+        const auto name = "Band " + juce::String (b) + " ";
+        pvst::chooseAndLink (*this, { { name + "frequency", &param (b, "freq") }, { name + "gain", &param (b, "gain") }, { name + "Q", &param (b, "q") },
+                                      { name + "key track", &param (b, "kt") }, { name + "on / off", &param (b, "on") }, { name + "type", &param (b, "type") } }, pvst::modOfDrag (d));
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -133,8 +152,8 @@ public:
             const auto r = juce::Rectangle<float> (side, side).withCentre (c);
             g.setColour (th::bg);
             g.fillRect (r);
-            g.setColour (bd.on ? (b == selected ? th::modified : th::fg) : th::mix (0.35f));
-            g.drawRect (r, b == selected ? 2.0f : 1.5f);
+            g.setColour (b == dropBand ? th::modified : bd.on ? (b == selected ? th::modified : th::fg) : th::mix (0.35f));
+            g.drawRect (r, b == dropBand ? 3.0f : b == selected ? 2.0f : 1.5f);
             g.setFont (th::mono (10.5f));
             g.drawText (juce::String (b), r.translated (0.0f, -side - 1.0f), juce::Justification::centred);
         }
@@ -294,7 +313,7 @@ private:
     }
 
     SeedProcessor& proc;
-    int selected = 1, dragBand = -1;
+    int selected = 1, dragBand = -1, dropBand = -1;
     double refCents = 0.0, startFreq = 0, startGain = 0, startQ = 1;
     bool haveNote = false, startTypeUsesGain = true;
     juce::Point<float> startPos;

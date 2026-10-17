@@ -110,7 +110,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
 
     // ---- loop ----
     add<AudioParameterChoice> (L, ParameterID { ids::core, v1 }, "Core", coreNames(), CoreMembrane);
-    add<AudioParameterFloat> (L, ParameterID { ids::feedback, v1 }, "Feedback", NormalisableRange<float> (0.0f, 1.0f), 0.55f,
+    add<AudioParameterFloat> (L, ParameterID { ids::feedback, v1 }, "Feedback", NormalisableRange<float> (0.0f, 1.0f), 0.65f,
                               Attr().withStringFromValueFunction ([] (float x, int) {
                                   if (feedbackSelfOsc (x)) return String ("self-osc ") + String (roundToInt ((x - 0.95f) / 0.05f * 100.0f)) + " %";
                                   const double t = feedbackToT60 (x);
@@ -139,7 +139,7 @@ AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
     add<AudioParameterFloat> (L, ParameterID { ids::tune, v1 }, "Tune", NormalisableRange<float> (-24.0f, 24.0f, 1.0f), 0.0f, fmt (0, "st"));
     add<AudioParameterFloat> (L, ParameterID { ids::fine, v1 }, "Fine", NormalisableRange<float> (-100.0f, 100.0f), 0.0f, fmt (1, "c"));
     add<AudioParameterFloat> (L, ParameterID { ids::bendRange, v1 }, "Bend range", NormalisableRange<float> (0.0f, 24.0f, 1.0f), 2.0f, fmt (0, "st"));
-    add<AudioParameterFloat> (L, ParameterID { ids::gain, v1 }, "Output", NormalisableRange<float> (-36.0f, 6.0f), -6.0f, fmt (1, "dB"));
+    add<AudioParameterFloat> (L, ParameterID { ids::gain, v1 }, "Output", NormalisableRange<float> (-36.0f, 6.0f), -3.0f, fmt (1, "dB"));
 
     // ---- insert slots ----
     // Default ring: a gentle filter, a little dispersion, a touch of saturation, the rest empty.

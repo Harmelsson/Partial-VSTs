@@ -269,9 +269,10 @@ void testDynamic()
     }
     check (maxStep < maxStepPre * 2.5f + 1e-4f, "morph sweep while ringing: no clicks (sample steps stay small)",
            "pre " + juce::String (maxStepPre, 4) + ", during " + juce::String (maxStep, 4));
-    const float L1 = r.proc->engine.voiceLineLength (0, 1);
-    const double expect = kSr / (440.0 * std::pow (2.0, (50 - 69) / 12.0) * 2.0);
-    check (std::abs (L1 - expect) / expect < 0.01, "after the morph, line 2 sits on the Calc partial 2 (= 2 x pitch)", juce::String (L1, 2) + " vs " + juce::String (expect, 2));
+    auto tail = r.render (0.4);
+    const double f0 = 440.0 * std::pow (2.0, (50 - 69) / 12.0);
+    const double f2 = peakNear (tail, 0, tail.size(), 2.0 * f0, 60.0);
+    check (std::abs (cents (f2, 2.0 * f0)) < 5.0, "after the morph, partial 2 rings at the Calc position (2 x pitch) — on the same ringing note", juce::String (f2, 2) + " Hz");
 }
 
 void testHit()
@@ -346,10 +347,14 @@ void testState()
     check (same, "save + load restores every parameter");
 }
 
-void bench()
+void benchOne (bool worst)
 {
-    Rig r; r.set (ids::core, (float) CorePartials); r.set (ids::feedback, 0.9f);
-    r.set (ids::slot (4, "type"), (float) SlotFreqShift); r.set (ids::slot (5, "type"), (float) SlotChorus);
+    Rig r;
+    if (worst)
+    {
+        r.set (ids::core, (float) CorePartials); r.set (ids::feedback, 0.9f);
+        r.set (ids::slot (4, "type"), (float) SlotFreqShift); r.set (ids::slot (5, "type"), (float) SlotChorus);
+    }
     juce::MidiBuffer chord;
     for (int k = 0; k < kMaxVoices; ++k) chord.addEvent (juce::MidiMessage::noteOn (1, 36 + k * 3, 0.9f), 0);
     r.proc->processBlock (r.buf, chord);
@@ -358,9 +363,11 @@ void bench()
     juce::MidiBuffer none;
     for (int b = 0; b < blocks; ++b) r.proc->processBlock (r.buf, (b % 40 == 0) ? chord : none); // re-strike all 12 every ~0.4 s
     const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
-    std::cout << "bench: " << kMaxVoices << " voices, Partials core (16 loops), 5 inserts: "
+    std::cout << "bench: " << kMaxVoices << (worst ? " voices, Partials core (16 loops), 5 inserts: " : " voices, default patch (Membrane 8 loops, 3 inserts): ")
               << juce::String (ms / 5000.0 * 100.0, 1) << " % of one core (" << r.proc->engine.activeVoices() << " voices active)" << std::endl;
 }
+
+void bench() { benchOne (false); benchOne (true); }
 
 void writeWav (const juce::File& f, const std::vector<float>& L, const std::vector<float>& R)
 {
@@ -396,9 +403,15 @@ int main (int argc, char** argv)
     for (int i = 1; i < argc; ++i)
         if (juce::String (argv[i]) == "--probe")
         {
-            Rig r; r.plain (CoreDelay); r.set (ids::feedback, 1.0f);
-            auto x = r.render (0.05, 57, 0.8f);
-            for (int k = 0; k < 20; ++k) { auto y = r.render (0.1); std::cout << k << " " << rmsDb (y, 0, 2400) << " dB  " << r.proc->engine.debugVoice (0) << std::endl; }
+            for (int variant = 0; variant < 6; ++variant)
+            {
+                Rig r; r.set (ids::core, (float) CoreDelay);
+                if (variant >= 1 && variant <= 3) r.set (ids::slot (variant, "type"), 0.0f);
+                if (variant == 4) for (int s = 1; s <= 3; ++s) r.set (ids::slot (s, "type"), 0.0f);
+                if (variant == 5) { for (int s = 1; s <= 3; ++s) r.set (ids::slot (s, "type"), 0.0f); r.set (ids::damp, 0.0f); r.set (ids::pitchAmt, 0.0f); r.set (ids::tension, 0.0f); }
+                auto x = r.render (1.0, 40, 0.9f);
+                std::cout << "variant " << variant << ": 0.1s " << rmsDb (x, 4800, 2400) << "  0.3s " << rmsDb (x, 14400, 2400) << "  0.6s " << rmsDb (x, 28800, 2400) << std::endl;
+            }
             return 0;
         }
     for (int i = 1; i + 1 < argc; ++i)
@@ -411,6 +424,21 @@ int main (int argc, char** argv)
     testDynamic();
     testHit();
     testState();
+    for (int i = 1; i + 1 < argc; ++i)
+        if (juce::String (argv[i]) == "--snapshot")
+        {
+            Rig r;
+            r.render (0.3, 45, 0.9f);   // a hit, so the views have something to show
+            r.render (0.2, 52, 0.6f);
+            std::unique_ptr<juce::AudioProcessorEditor> ed (r.proc->createEditor());
+            for (int k = 0; k < 20; ++k) juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+            auto f = juce::File::getCurrentWorkingDirectory().getChildFile (argv[i + 1]);
+            f.deleteFile();
+            juce::FileOutputStream os (f);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+            std::cout << "snapshot: " << f.getFullPathName() << std::endl;
+        }
     std::cout << (failures == 0 ? "ALL PASSED" : juce::String (failures) + " FAILED") << std::endl;
     return failures;
 }

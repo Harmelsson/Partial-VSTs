@@ -368,3 +368,21 @@ core differences; slots are interchangeable (drag to swap, Type ▾); Modes morp
 (user's idea; Physical kept as an option because it is what makes drums sound like drums); link conflict options
 (leader / last write / automation unlinks — recommended leader). Interpretation to confirm: "corners touch" = one
 aligned grid where every border runs through.
+
+## 2026-10-17 — session 3 — Sane v0.1.0 built ("let's hear it")
+**User:** "I like the new layout more! I pick 1 [★ leader wins]… some things I'm unsure of I can only feedback once I
+hear what they do. Great work so far, let's hear it. ^^"
+**Done:** Sane v0.1.0 (`plugins/Sane/`): engine (3 cores as delay-loop banks, 9 insert types inside every loop, per-note
+noise, strike vel/key, drawn pitch drop + energy tension, length, governor) + desert UI from mockup 2 + SaneTests.
+**Worked first try:** pitch accuracy (LP phase compensation + Lagrange delay): every core within 0.1 cent.
+**Failed / fixed on the way (all found by headless tests or WAV analysis, not by ear):**
+1. Self-oscillation died: the loop locked onto DC (gain > 1 at 0 Hz); the output DC blocker then removed it → silence.
+   → DC guard inside the loop (gain/phase compensated).
+2. Governor too aggressive (min gain 0.2) killed self-oscillating loops → gentle, floor 0.6.
+3. Default Membrane/Partials too quiet (-36/-45 dBFS) → per-core injection makeup + N^0.25 output normalisation.
+4. Sub-bass rumble (8–26 Hz): any high-pass INSIDE a loop creates a "phantom" low mode. A stronger in-loop HP made it
+   worse (and boosted harmonics when compensated). → gentle in-loop guard only + per-voice output high-pass outside the loop.
+5. Membrane died far too fast: coupling `I - c·Householder` is lossy for 0 < c < 1 (mean direction × (1-2c) per pass).
+   → lossless Givens rotations between neighbouring lines.
+6. Bar table formula approximated mode 2 as 2.778 (should be 2.756) → exact beta values for the first modes.
+Decisions: v0.1 leaves out kit drawer, link groups (rule ★ leader wins recorded), Seed scale keys, Pick/Dyn EQ/Air slots.

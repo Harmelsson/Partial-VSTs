@@ -17,6 +17,7 @@
 // Pitch = played note + tune + bend + drawn pitch envelope (pitchAmt, pitchTime) + TENSION
 // (energy-dependent glide, Avanzini/Marogna/Bank: pitch rises with the energy still in the drum).
 #include <atomic>
+#include <complex>
 #include <juce_core/juce_core.h>
 #include <memory>
 #include "SaneDsp.h"
@@ -39,11 +40,11 @@ struct EngineParams
           exVelLength = -0.3f, exKeyColor = 0.4f, exSpread = 0.5f;
     float stBase = 0.4f, stVel = -0.6f, stKey = 0.4f, stRandom = 0.06f;
     int core = CoreMembrane;
-    float feedback = 0.55f, damp = 0.4f, tension = 1.5f, coupling = 0.3f, width = 0.5f;
+    float feedback = 0.65f, damp = 0.4f, tension = 1.5f, coupling = 0.3f, width = 0.5f;
     int table = TabMembrane, srcA = SrcPhysical, srcB = SrcCalc;
     float morph = 0.0f, calcSeed = 2.0f, rolloff = 0.35f;
     float pitchAmt = 3.0f, pitchTime = 60.0f, lengthMs = kLengthOff;
-    float tune = 0.0f, fine = 0.0f, bendRange = 2.0f, gainDb = -6.0f;
+    float tune = 0.0f, fine = 0.0f, bendRange = 2.0f, gainDb = -3.0f;
     std::array<int, kNumSlots> slotType {};
     std::array<float, kNumSlots> slotA {}, slotB {}, slotC {};
 };
@@ -69,6 +70,7 @@ struct HitReport
     std::array<std::atomic<float>, kScopeBins> scope {};
     std::atomic<int> scopeFill { 0 };
     std::array<std::atomic<uint64_t>, 2> held {};
+    std::atomic<int> activeVoices { 0 };
 };
 
 class SaneEngine
@@ -176,6 +178,7 @@ public:
             if (! v.active) continue;
             renderVoice (v, ratios, sc, active, nActive, outL, outR, numSamples, outGain, vi == scopeVoice);
         }
+        report.activeVoices.store (activeVoices(), std::memory_order_relaxed);
     }
 
     HitReport report;
@@ -199,7 +202,7 @@ private:
         float L = 100.0f, Lstep = 0.0f;      // current delay (samples) and per-sample ramp
         float g = 0.9f, gStep = 0.0f;        // loop gain
         float lpCoef = 1.0f, lpState = 0.0f, lpComp = 1.0f;
-        float hpR = 0.999f, hpX1 = 0.0f, hpY1 = 0.0f;  // DC blocker inside the loop (else a loop gain > 1 latches onto DC)
+        float hpR = 0.9995f, hpX1 = 0.0f, hpY1 = 0.0f;  // DC guard inside the loop
         float bpB0 = 0.0f, bpA1 = 0.0f, bpA2 = 0.0f, bpX1 = 0.0f, bpX2 = 0.0f, bpY1 = 0.0f, bpY2 = 0.0f;
         float inj = 0.0f, panL = 0.707f, panR = 0.707f;
         float inc = 0.0f;                    // line frequency as cycles/sample (ring mod "follow")
@@ -221,6 +224,9 @@ private:
         int excW = 0;
         float combDelay = 0.0f;
         int ctrlLeft = 0;
+        // output high-pass (2nd-order Butterworth, half an octave+ below the lowest mode): removes sub-bass outside the loop
+        float ob0 = 1.0f, ob1 = 0.0f, ob2 = 0.0f, oa1 = 0.0f, oa2 = 0.0f;
+        std::array<float, 2> ox1 {}, ox2 {}, oy1 {}, oy2 {};
         std::array<Line, kMaxLines> lines;
 
         void reset (int lineSize)
@@ -236,6 +242,7 @@ private:
             }
             if (excBuf != nullptr) std::fill (excBuf, excBuf + lineSize, 0.0f);
             excW = 0;
+            ox1.fill (0.0f); ox2.fill (0.0f); oy1.fill (0.0f); oy2.fill (0.0f);
         }
     };
 
@@ -316,6 +323,15 @@ private:
         // comb on the exciter for Delay / Membrane: pluck at r/2 of the period
         v.combDelay = (p.core == CorePartials) ? 0.0f : (float) std::clamp (v.strikeR * 0.5 * sr / f0, 0.0, (double) lineSize - 4.0);
 
+        {
+            double minRatio = 1.0;
+            if (p.core != CoreDelay) for (int i = 0; i < nLines; ++i) minRatio = std::min (minRatio, ratios[(size_t) i]);
+            const double fc = std::clamp (0.5 * f0 * minRatio, 10.0, 0.2 * sr);
+            const double w0 = 2.0 * dsp::kPi * fc / sr, al = std::sin (w0) / (2.0 * 0.70710678), cw = std::cos (w0), a0 = 1.0 + al;
+            v.ob0 = (float) ((1.0 + cw) * 0.5 / a0); v.ob1 = (float) (-(1.0 + cw) / a0); v.ob2 = v.ob0;
+            v.oa1 = (float) (-2.0 * cw / a0); v.oa2 = (float) ((1.0 - al) / a0);
+        }
+
         for (int i = 0; i < kMaxLines; ++i)
         {
             auto& ln = v.lines[(size_t) i];
@@ -338,16 +354,17 @@ private:
                 comp = 1.0 / std::max (0.05, mag);
                 lpPhaseDelay = std::atan2 (im, re) / std::max (1e-9, w);
             }
-            // DC blocker (one-pole high-pass, cutoff well below f): its phase lead and gain at f are compensated too.
+            // DC guard inside the loop: a gentle one-pole high-pass far below f (max 5 Hz). Without it a loop gain > 1
+            // (self-oscillation, biased saturation) latches onto DC. Its tiny gain loss and phase lead at f are compensated.
+            // (Any high-pass in a loop also creates a weak "phantom" mode far below the pitch; the per-voice output
+            // high-pass below removes it, outside the loop, where it can't touch tuning or stability.)
             {
-                const double fc = std::min (12.0, f * 0.08);
+                const double fc = std::min (5.0, f * 0.03);
                 const double R = std::exp (-2.0 * dsp::kPi * fc / sr);
-                // H = (1 - e^-jw) / (1 - R e^-jw)
-                const double nr = 1.0 - std::cos (w), ni = std::sin (w);
-                const double dr = 1.0 - R * std::cos (w), di = R * std::sin (w);
-                const double hr = (nr * dr + ni * di) / (dr * dr + di * di), hi = (ni * dr - nr * di) / (dr * dr + di * di);
-                comp /= std::max (0.05, std::sqrt (hr * hr + hi * hi));
-                lpPhaseDelay -= std::atan2 (hi, hr) / std::max (1e-9, w); // phase lead = negative delay
+                const std::complex<double> z1 = std::polar (1.0, -w);
+                const auto h = (1.0 - z1) / (1.0 - R * z1);
+                comp /= std::max (0.5, std::abs (h));
+                lpPhaseDelay -= std::arg (h) / std::max (1e-9, w);
                 ln.hpR = (float) R;
             }
             ln.lpCoef = (float) a;
@@ -398,7 +415,11 @@ private:
     {
         const int nLines = linesForCore (prm.core);
         const bool partials = prm.core == CorePartials;
-        const float c2n = nLines > 1 ? prm.coupling * (partials ? 0.15f : 1.0f) * 2.0f / (float) nLines : 0.0f;
+        // coupling = lossless mixing: Givens rotations between neighbouring lines, in two staggered stages
+        // ((0,1),(2,3)... then (1,2),(3,4)...,(N-1,0)). Orthogonal, so it only MOVES energy between modes, never removes it
+        // (a plain I - c*Householder mix would leak energy for 0 < c < 1 and kill the ring).
+        const float theta = (float) (nLines > 1 ? prm.coupling * (partials ? 0.15 : 1.0) * dsp::kPi * 0.25 : 0.0);
+        const float rc = std::cos (theta), rs = std::sin (theta);
         // output level: lines add up, so normalise gently (N^0.25) — keeps the three cores at similar loudness
         const float norm = outGain / std::sqrt (std::sqrt ((float) nLines));
         const int mask = lineSize - 1;
@@ -430,7 +451,6 @@ private:
             }
 
             // read all lines (3rd-order Lagrange fractional delay)
-            float sum = 0.0f;
             for (int l = 0; l < nLines; ++l)
             {
                 auto& ln = v.lines[(size_t) l];
@@ -444,14 +464,29 @@ private:
                 const float out = -x0 * pm1 * pm2 * pm3 * (1.0f / 6.0f) + x1 * p * pm2 * pm3 * 0.5f
                                   - x2 * p * pm1 * pm3 * 0.5f + x3 * p * pm1 * pm2 * (1.0f / 6.0f);
                 y[l] = out;
-                sum += out;
+            }
+            float u[kMaxLines];
+            for (int l = 0; l < nLines; ++l) u[l] = y[l];
+            if (nLines > 1 && theta > 0.0f)
+            {
+                for (int l = 0; l + 1 < nLines; l += 2)
+                {
+                    const float a = u[l], b = u[l + 1];
+                    u[l] = rc * a - rs * b; u[l + 1] = rs * a + rc * b;
+                }
+                for (int l = 1; l < nLines; l += 2)
+                {
+                    const int m = (l + 1) % nLines;
+                    const float a = u[l], b = u[m];
+                    u[l] = rc * a - rs * b; u[m] = rs * a + rc * b;
+                }
             }
 
             float oL = 0.0f, oR = 0.0f;
             for (int l = 0; l < nLines; ++l)
             {
                 auto& ln = v.lines[(size_t) l];
-                float s = y[l] - c2n * sum;
+                float s = u[l];
                 const float period = ln.L;
                 for (int k = 0; k < nActive; ++k)
                     s = ln.ins[(size_t) active[k]].process (s, sc[(size_t) active[k]], period, ln.inc);
@@ -480,6 +515,14 @@ private:
                 oR += y[l] * ln.panR;
             }
             oL *= norm; oR *= norm;
+            {
+                auto hp = [&v] (float x, int c) {
+                    const float o = v.ob0 * x + v.ob1 * v.ox1[(size_t) c] + v.ob2 * v.ox2[(size_t) c] - v.oa1 * v.oy1[(size_t) c] - v.oa2 * v.oy2[(size_t) c];
+                    v.ox2[(size_t) c] = v.ox1[(size_t) c]; v.ox1[(size_t) c] = x; v.oy2[(size_t) c] = v.oy1[(size_t) c]; v.oy1[(size_t) c] = o;
+                    return o;
+                };
+                oL = hp (oL, 0); oR = hp (oR, 1);
+            }
             outL[i] += oL;
             outR[i] += oR;
 

@@ -108,3 +108,17 @@ without CLAUDE.md on main it doesn't even know to look at other branches). Alway
   so the host's typing-keyboard shortcuts stop working. Hand focus back with `SetFocus(GetAncestor(h, GA_ROOT))` after
   the click (not while a TextEditor / popup / modal is active). Cannot be tested on Linux.
 
+
+## Feedback loops (Sane, 2026-10-17)
+- **A loop with gain > 1 latches onto DC** unless something inside the loop blocks DC. The output DC blocker then
+  "removes" the oscillation and you hear silence. Always keep a (compensated) DC guard inside every feedback loop.
+- **Any high-pass inside a loop creates a weak low "phantom" mode** (where the HP's phase lead matches the loop delay).
+  Don't fight it inside the loop (a stronger HP rings louder, and compensating its gain boosts the harmonics → runaway).
+  Remove sub-bass OUTSIDE the loop (per-voice output high-pass that follows the pitch).
+- **`I - c·H` (partial Householder) is NOT lossless** for 0 < c < 1: the mean direction is scaled by (1-2c) each pass and
+  the whole FDN drains fast. Use orthogonal mixing (Givens rotations, or full H) and set decay only with the loop gains.
+- **Compensate the phase delay of every in-loop filter at the mode frequency** (LP, DC guard) or modes go flat by
+  several cents; a zero-phase-at-centre band-pass needs none. With that + 3rd-order Lagrange, pitch is exact to 0.1 c.
+- **Measure glides early**: an energy-driven pitch glide is mostly over after ~20 ms; analysis windows must start at ~5 ms.
+- **Analyse rendered WAVs numerically** (peaks, sub-band energy, decay per window) — it caught 3 problems the pass/fail
+  tests didn't (quiet cores, rumble, fast membrane decay). `SaneTests --wav dir` + numpy in the container.

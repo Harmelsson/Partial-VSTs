@@ -2,17 +2,26 @@
 
 _Last updated: 2026-10-17 (session 3)_
 
-## Sane v0.1.0 — IN PROGRESS (engine done + tested, real UI not yet)
-Design: `docs/DRUM_RESEARCH.md` + mockup https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau (`docs/mockups/sane/`).
-User approved mockup 2, picked link-conflict rule "★ leader wins", said "let's hear it".
-**Done:** `plugins/Sane/` — SaneParams (all params), SaneDsp (mode tables, burst, 9 insert types), SaneEngine
-(12 voices; cores Delay 1 loop / Membrane 8-line FDN / Partials 16 band-passed loops; inserts inside every
-loop; per-note noise; strike vel/key; drawn pitch drop + energy tension; length; governor; in-loop DC blocker),
-PluginProcessor. `tools/SaneTests.cpp`: all checks pass (pitch within 0.1 c in every core). CPU worst case
-(12 voices x 16 loops x 5 inserts) ~71 % of one core → optimise later.
-**Half-done:** PluginEditor is a TEMPORARY generic editor. **Next concrete step:** write the desert UI
-(mockup 2 layout: exciter / loop ring + slots / modes / strike / slot editor / hit / keys strip), then
-docs + push to main. v0.1 leaves out: kit drawer, link groups, scale keys (12-EDO for now), Pick/Dyn EQ/Air.
+## Sane v0.1.0 — first playable build (feedback drums) — waiting for the user's ears
+Design: `docs/DRUM_RESEARCH.md`, mockup `docs/mockups/sane/` (https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau).
+Code: `plugins/Sane/` (README there). Tests: `tools/SaneTests.cpp` — all pass (pitch within 0.1 c in every core,
+safety at every extreme incl. self-oscillation, click-free morph, levels, tension/pitch drop/length, state).
+CPU (Linux): default patch with 12 ringing voices ~18 % of a core; heaviest (Partials, 5 inserts) ~59 %.
+**Download:** the newest Release (contains Seed.vst3 AND Sane.vst3). First time: FL → Manage plugins → Find installed.
+
+### User should test (listen for)
+1. **Basics:** play low keys (C1–C3). Membrane core = tom-ish. Window opens at 90 % (− / + top right).
+2. **Every note is different:** repeat one key — the noise changes each time (Exciter shows the last 3 in black).
+   "random per note" = how much.
+3. **Strike:** soft notes ring "edgier", hard notes "thumpier" (velocity → position). Click the round head to move the base.
+4. **Cores:** Membrane / Partials (pure, bell/tabla-like) / Delay (plucky, string-like until Disperse or Flip).
+5. **Loop slots:** click a slot, change its type (TYPE ▾) and knobs WHILE a note rings; drag a slot onto another to swap.
+   Try Flip (50 % = noise drum), Freq Shift (spirals), Fold, Ring Mod. FEEDBACK at the very top = self-oscillation
+   (holds while the key is held, stops on release).
+6. **Modes:** A = Physical (pick Membrane/Timpani/Tabla/Bar/Plate), B = Calc (seed); slide MORPH while ringing.
+7. **Hit:** drag the black squares (pitch drop amount / time) and the white one (length). TENSION = hard hits start sharp.
+8. **Keys strip:** click keys (low on a key = loud); they light up and fade.
+Not in v0.1 (shown dashed): kit drawer, link groups, scale keys (12-EDO for now), audio-in exciter, picked-partial targeting.
 
 ## Seed v0.7.0 — feedback batch 2 (drawn LFOs, modulate everything, locks, window scale)
 Design + HOW TO USE: `docs/PLAYGROUND.md` ("v0.7.0 changes"). 163 headless checks pass
@@ -51,7 +60,7 @@ the first to check: the keyboard-focus fix (Windows only) and the window scale i
    the real notes. Fundamental + Base key decide where the first note is.
 
 ## Next (user chooses)
-- **Drum plugin decisions** (see top) — the user's current priority.
+- **Sane v0.2** after the user's first listen: kit drawer, link groups (★ leader wins), Seed scale keys, CPU work.
 - FX feedback (user announced it comes after this batch).
 - Partial-based FX from IDEAS.md (R1–R7), a distortion primer + tuned distortion.
 - More synths using the shared calculator once Seed is curated.

@@ -16,7 +16,7 @@ To see a build that's still running: the **Actions** tab at the top of the repo 
    Replacing an older version: overwrite it.
 3. Start FL Studio. First time only: **Options → Manage plugins → Find installed plugins**.
    The plugins appear under the manufacturer **Partial**.
-4. Add it: Channel rack → **+** → search "Seed".
+4. Add it: Channel rack → **+** → search "Seed" (or "Sane", the drum plugin).
 
 Check the tiny grey text in the bottom-right of the plugin window: `v0.1.0 · build N · abc1234`.
 **N must match the build number you downloaded** — otherwise FL is still using an old copy.

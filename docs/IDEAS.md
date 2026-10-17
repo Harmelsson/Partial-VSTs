@@ -23,6 +23,7 @@ cross-note consonance `R ≈ (m/n)^S`.
 | I5 | **Swarm** | Partials are particles with physics: springs to their "home" position, repulsion from dissonant neighbors, damping. Sound evolves on its own; knobs set gravity/temperature. | 🔴 | med | idea |
 | I7 | **Mitosis** | Voices split/fuse as dissonance valleys split/merge (from SEED_NOTE_LIFE.md; may become a Seed mode). | 🔴 | med | idea |
 | I6 | **Seed Morph** | XY pad / single "Hand of God" slider sliding continuously between two seeds (or two EDOs) live — tuning *and* timbre morph together as a playable gesture. | 🔴 | low | idea (could be a mode of I1) |
+| I8 | **Drum (working name: Hide?)** | Feedback-synthesis drums, realistic + tribal + experimental: exciter → feedback loop (FDN membrane / partial loops / fine delay) with FX inserts inside the loop on the whole sound or on picked partials; energy→pitch drop; Seed tuning ecosystem. See DRUM_RESEARCH.md. | 🔴 | med | **research done** — waiting for user decisions |
 
 ## Effects (audio in → audio out)
 

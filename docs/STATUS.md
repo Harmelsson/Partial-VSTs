@@ -1,6 +1,12 @@
 # Status
 
-_Last updated: 2026-09-30 (session 2)_
+_Last updated: 2026-10-17 (session 3)_
+
+## NEW: drum plugin (feedback synthesis) — RESEARCH DONE, waiting for user decisions
+Full research + options: `docs/DRUM_RESEARCH.md` (drum physics, feedback structures, partial-FX-in-loop
+methods, 4 architectures A/B/C/D, exciters, Seed tuning ecosystem T1–T4, UI direction). Nothing built yet.
+**Next:** user answers "Decisions for the user" (end of that doc) → agent makes a visual mockup in the
+desert palette (desaturated desert yellow + sharp black/white) → user approves → build.
 
 ## Seed v0.7.0 — feedback batch 2 (drawn LFOs, modulate everything, locks, window scale)
 Design + HOW TO USE: `docs/PLAYGROUND.md` ("v0.7.0 changes"). 163 headless checks pass
@@ -39,6 +45,7 @@ the first to check: the keyboard-focus fix (Windows only) and the window scale i
    the real notes. Fundamental + Base key decide where the first note is.
 
 ## Next (user chooses)
+- **Drum plugin decisions** (see top) — the user's current priority.
 - FX feedback (user announced it comes after this batch).
 - Partial-based FX from IDEAS.md (R1–R7), a distortion primer + tuned distortion.
 - More synths using the shared calculator once Seed is curated.

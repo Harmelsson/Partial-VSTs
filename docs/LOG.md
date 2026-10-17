@@ -305,3 +305,28 @@ the upper border or out to FL to play sound from my laptop's keyboard." FX feedb
 **Failed on the way:** my sidechain test put the signal on channels 2-3 — JUCE shares channels between input and output
 buses (see above); a first version of the link-chip click ran `onLocate` after a right-click removal (guard `ignoreUp`).
 
+
+## 2026-10-17 — session 3 — drum plugin research (no code)
+**Start:** branch `claude/vst-feedback-features-8keomg` held Seed v0.6.0 + v0.7.0, which were never pushed to
+`main`. Fast-forwarded this session's branch to it; `main` gets it with this task's push.
+**User (verbatim-ish):** new plugin idea while Seed isn't finished: drum sounds, "realistic and tribal-like ones
+mainly, but an experimental project". Core = **feedback synthesis** ("the closest process to achieving realistic
+drums that I know of"); the whole loop must run inside the one VST ("FL has some bad mojo against this"). Insert
+"really fine delays and other types of FX that affect the whole sound or only partials within the feedback loop".
+Research feedback synthesis (mainly for drums) and what makes drums drums (what resonates, pitch behaviour,
+partials, harmonics?). Must be compatible with Seed and future plugins: scale and partial properties behave the
+same and tuning is exchangeable ("coherent ecosystem"). Give multiple approaches to choose from. New visual design
+to try: desaturated brown-desert yellow background, sharp blacks and whites for the important parts; every
+changeable parameter also changeable in a graphical window (dynamic EQ, sound length, waveform in the background…).
+After the concept, show a mockup first. "Don't build anything yet."
+**Done:** web research → `docs/DRUM_RESEARCH.md`. Key findings: membranes are inharmonic (Bessel ratios
+1, 1.59, 2.14, 2.30…); harmonic drums exist only by design (timpani via kettle and air, tabla via loaded head);
+pitch drops with energy (tension modulation, ≈ proportional to energy → cheap model); two heads give mode pairs
+and beating; Helmholtz bass in goblet drums; snare wires = nonlinear contact. A single feedback loop is harmonic
+(string-like), so drum feedback needs dispersion, FDN coupling, per-partial loops, or nonlinearity. FFT inside
+the loop rejected (latency per pass too long for drum pitches). Proposed architectures A (FDN membrane), B (partial
+loops), C (loop rack), D (hybrid, recommended); exciters E1–E5; key modes K1–K3; mode sources M1–M3;
+tuning exchange T1 .scl (exists), T2 copy/paste tuning, T3 live link, T4 MTS-ESP.
+**Failed / limits:** WebFetch couldn't resolve several hosts (wikipedia, polarity.me, cornell), so some details
+(e.g. the exact Avanzini equations) come from search summaries + prior knowledge, not full papers.
+**Next:** user decisions → mockup in the desert palette.

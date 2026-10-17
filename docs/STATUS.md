@@ -2,11 +2,13 @@
 
 _Last updated: 2026-10-17 (session 3)_
 
-## NEW: drum plugin (feedback synthesis) — RESEARCH DONE, waiting for user decisions
-Full research + options: `docs/DRUM_RESEARCH.md` (drum physics, feedback structures, partial-FX-in-loop
-methods, 4 architectures A/B/C/D, exciters, Seed tuning ecosystem T1–T4, UI direction). Nothing built yet.
-**Next:** user answers "Decisions for the user" (end of that doc) → agent makes a visual mockup in the
-desert palette (desaturated desert yellow + sharp black/white) → user approves → build.
+## NEW: Sane (drum plugin, feedback synthesis) — MOCKUP v1 waiting for the user's verdict
+Research + options + **user decisions**: `docs/DRUM_RESEARCH.md` (D hybrid, kit + tuned keys, physical↔seed
+morph, copy/paste + live link GROUPS, randomisable noise exciter first, name **Sane**). Nothing built yet.
+Mockup v1 (design canvas): https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau — source copy in
+`docs/mockups/sane/` (Main = main window, Kit = kit mode + link groups). Theme tweaks on the canvas: 4 sand
+tones, displays black or sand.
+**Next:** user reacts to the mockup → revise → then build v0.1 (exciter + membrane FDN core + 4 inserts).
 
 ## Seed v0.7.0 — feedback batch 2 (drawn LFOs, modulate everything, locks, window scale)
 Design + HOW TO USE: `docs/PLAYGROUND.md` ("v0.7.0 changes"). 163 headless checks pass

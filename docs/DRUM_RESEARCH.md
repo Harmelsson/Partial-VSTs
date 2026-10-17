@@ -288,3 +288,15 @@ The same calculator gives the same scale and the same partials.
 - Feedback structures: [Karplus-Strong (J. O. Smith)](https://ccrma.stanford.edu/~jos/pasp/Karplus_Strong_Algorithms.html), [feedback AM, EURASIP 2011](https://asp-eurasipjournals.springeropen.com/articles/10.1155/2011/434378), [Five variations on a feedback theme](https://mural.maynoothuniversity.ie/id/eprint/2333/), [filter pinging](https://sdiy.info/wiki/Ping_a_filter), [Max *perc (allpass-loop percussion)](https://cycling74.com/projects/max-for-live-*perc-%E2%80%94-percussion-synth), [delay-loop percussion patent](https://patents.google.com/patent/US5223653)
 - Mallets: [force pulse synthesis](https://ccrma.stanford.edu/~jos/pasp/Force_Pulse_Synthesis.html), [Papetti impact model](https://avanzini.di.unimi.it/downloads/publications/papetti_taslp11.pdf)
 - Tuning sync: [simple-mts-main](https://github.com/baconpaul/simple-mts-main), [MTS-ESP Mini](https://www.kvraudio.com/product/mts-esp-mini-by-oddsound/details)
+
+## User decisions (2026-10-17)
+1. Architecture: **D Hybrid** (loop rack around a switchable core: FDN membrane / partial loops / fine delay).
+2. Partial FX method: follows from D (band split + partial picker slots; per-partial inserts in the partial-loops core).
+3. Keys: **both** tuned mode and kit mode ("both super useful").
+4. Mode source: **morph knob** (physical ↔ seed).
+5. Tuning exchange: **copy/paste AND live link**. Links must be configurable groups: e.g. 2 plugins linked, another
+   not, or 2+2 in separate groups → link channels (A/B/C/D/off) per instance.
+6. Exciter v1: **randomisable noise**. Later: audio input as exciter ("me hitting my desk" → processable source).
+7. First drums: tom, djembe, tabla, taiko, frame drum, snare. Future: full drum kits and cinematic drums.
+8. Name: **Sane** ("Insane in the membrane").
+Visual direction: appealing, but the user decides only after seeing it → mockup next.

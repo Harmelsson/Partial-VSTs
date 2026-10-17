@@ -330,3 +330,20 @@ tuning exchange T1 .scl (exists), T2 copy/paste tuning, T3 live link, T4 MTS-ESP
 **Failed / limits:** WebFetch couldn't resolve several hosts (wikipedia, polarity.me, cornell), so some details
 (e.g. the exact Avanzini equations) come from search summaries + prior knowledge, not full papers.
 **Next:** user decisions → mockup in the desert palette.
+
+## 2026-10-17 — session 3 — Sane decisions + mockup v1
+**User decisions:** 1 D hybrid · 2 per choice 1 · 3 kit AND tuned ("both super useful") · 4 morph knob · 5 copy/paste
+AND live link, links configurable ("maybe I want 2 synths linked, another not, or 2 together and 2 others together")
+· 6 randomisable noise first, later audio as exciter ("me hitting my desk") · 7 the listed drums ok; future: full
+drum kits and cinematic drums · 8 name **Sane** ("Insane in the membrane"). Visual direction "seems appealing,
+but I can only say 'that's it' when I see it".
+**Done:** interactive mockup on a design canvas (https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau), copy in
+`docs/mockups/sane/`. Main window: exciter (noise burst display, dice), strike pad (click the head; mode levels
+follow real Bessel J_m(j·r) for the membrane table), loop ring (Σ junction in/out, 7 insert slots on the ring,
+core switch membrane/partials/delay, energy dots running round), modes display (level up, decay down, morph
+slider moves modes between ◇ physical and ▲ seed positions, scale ticks from the linked tuning), hit timeline
+(waveform, amplitude, pitch-drop curve, draggable length), selected-slot editor (dyn EQ over spectrum etc.),
+keys strip (tuned = scale degrees on keys, kit = 16 pads). Second screen: 4×4 kit, pad "one key / key range",
+link-group table (per instance OFF/A/B/C/D), what a group shares (seed / partials / scale / base key /
+fundamental), group overview. Palette: ground #BDAE8B (+3 alternatives as tweaks), ink #121110, paper #F6F3EA;
+Archivo condensed + IBM Plex Mono.

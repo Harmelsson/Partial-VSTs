@@ -53,3 +53,4 @@ cross-note consonance `R ≈ (m/n)^S`.
 - FL Studio handles MIDI-effect plugins awkwardly → put scale/keyboard mapping *inside* each
   instrument rather than as a separate MIDI-FX plugin.
 - Tuning ideas (N-note scales from a seed) can live inside instruments as a "keyboard map" mode.
+- **Seed backlog (user 2026-10-17):** bottom keyboard strip like Sane's mockup — keys show the tuned scale degrees and light up on press / fade on release.

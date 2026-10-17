@@ -347,3 +347,18 @@ keys strip (tuned = scale degrees on keys, kit = 16 pads). Second screen: 4×4 k
 link-group table (per instance OFF/A/B/C/D), what a group shares (seed / partials / scale / base key /
 fundamental), group overview. Palette: ground #BDAE8B (+3 alternatives as tweaks), ink #121110, paper #F6F3EA;
 Archivo condensed + IBM Plex Mono.
+
+## 2026-10-17 — session 3 — user feedback on Sane mockup v1 → v2
+**User (verbatim-ish):** "Overall look is great!" Displays: not black ("a little intimidating") → a little darker
+desaturated brown than the base yellow. Exciter: re-randomise the noise burst on EVERY MIDI note, amount tunable and
+modulated by velocity / keytrack. Strike: "great thing" → velocity sets position (quiet = rim, loud = centre); in
+tuned mode keytrack too (higher = rim); amounts tweakable. Loop: the IN/OUT arrows overlap the ring arrows → remove.
+Questions: does Strike only matter for Membrane? exact differences membrane/partials/delay? FX must be
+interchangeable. "+ Slot" button confusing (no bigger editor). Modes: why morph physical↔seed? Wants morph between
+"calculated (same as Seed's calculator) or inserted (tuning file)" and "linked (the common tuning)". Hit: two hit
+boxes (title + play button) — play button not needed, unsure about the box; pitch-drop curve must be editable by
+moving the curve. Link sharing options were only visible in the kit screen. No Tweaks button found. Kit = a menu that
+extends the window on the right, drums listed and scrolled, clicking one edits it in the main window. Link conflicts:
+what if two linked synths' parameters are automated at the same time? Design: "above and below each other, the
+borders' corners should touch together" (aligned grid). Keyboard showing the tuned scale: loved — should light up on
+press and release; **put that in Seed later too**. Wants another mockup before building.

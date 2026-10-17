@@ -362,3 +362,9 @@ extends the window on the right, drums listed and scrolled, clicking one edits i
 what if two linked synths' parameters are automated at the same time? Design: "above and below each other, the
 borders' corners should touch together" (aligned grid). Keyboard showing the tuned scale: loved — should light up on
 press and release; **put that in Seed later too**. Wants another mockup before building.
+**Done (mockup 2, same artifact URL, Kit artboard removed):** all of the above. Answers given in chat: Strike matters for
+all three cores (membrane = where energy enters the FDN, partials = Bessel mode shapes, delay = comb on the hit);
+core differences; slots are interchangeable (drag to swap, Type ▾); Modes morph endpoints are now selectable sources
+(user's idea; Physical kept as an option because it is what makes drums sound like drums); link conflict options
+(leader / last write / automation unlinks — recommended leader). Interpretation to confirm: "corners touch" = one
+aligned grid where every border runs through.

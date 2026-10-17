@@ -2,13 +2,17 @@
 
 _Last updated: 2026-10-17 (session 3)_
 
-## NEW: Sane (drum plugin, feedback synthesis) — MOCKUP v1 waiting for the user's verdict
-Research + options + **user decisions**: `docs/DRUM_RESEARCH.md` (D hybrid, kit + tuned keys, physical↔seed
-morph, copy/paste + live link GROUPS, randomisable noise exciter first, name **Sane**). Nothing built yet.
-Mockup v1 (design canvas): https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau — source copy in
-`docs/mockups/sane/` (Main = main window, Kit = kit mode + link groups). Theme tweaks on the canvas: 4 sand
-tones, displays black or sand.
-**Next:** user reacts to the mockup → revise → then build v0.1 (exciter + membrane FDN core + 4 inserts).
+## NEW: Sane (drum plugin, feedback synthesis) — MOCKUP 2 waiting for the user's verdict
+Research + options + user decisions: `docs/DRUM_RESEARCH.md`. Nothing built yet.
+Mockup (design canvas, interactive): https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau — source copy
+`docs/mockups/sane/Main.dc.html`. v2 = brown displays (#7E705A), aligned grid (all borders meet), per-note noise
+re-roll + vel/key mods, strike vel/key → position, empty "+ ADD FX" slot + type picker, drag-swap slots, Modes
+morph between selectable endpoints A/B (Physical / Calc / File / Linked), draggable pitch-drop + length
+handles, keys/pads light up on press and fade on release, kit list as a right-side drawer, link popover
+(groups, leader ★, what is shared, conflict rule).
+**Open question for the user:** link conflict rule — ★ leader wins (recommended) / last change wins /
+automation unlinks.
+**Next:** user verdict on mockup 2 → (revise) → build v0.1 (noise exciter + membrane FDN core + 4 inserts).
 
 ## Seed v0.7.0 — feedback batch 2 (drawn LFOs, modulate everything, locks, window scale)
 Design + HOW TO USE: `docs/PLAYGROUND.md` ("v0.7.0 changes"). 163 headless checks pass

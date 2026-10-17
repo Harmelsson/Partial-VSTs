@@ -41,6 +41,7 @@ target_compile_definitions(pvst_shared INTERFACE
     PVST_GIT_HASH="${PVST_GIT_HASH}")
 
 add_subdirectory(plugins/Seed)
+add_subdirectory(plugins/Sane)
 
 enable_testing()
 add_subdirectory(tools)

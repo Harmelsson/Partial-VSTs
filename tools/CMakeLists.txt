@@ -22,3 +22,26 @@ target_link_libraries(SeedTests PRIVATE
     juce::juce_recommended_warning_flags)
 
 add_test(NAME SeedTests COMMAND SeedTests)
+
+# SaneTests: same idea for Sane (drives the real SaneProcessor headlessly).
+#   ./SaneTests                 all checks      ./SaneTests --bench   CPU
+#   ./SaneTests --wav dir       also renders example hits to WAV files (for inspection)
+#   ./SaneTests --snapshot x.png  render the editor (xvfb-run)
+juce_add_console_app(SaneTests PRODUCT_NAME "SaneTests")
+target_sources(SaneTests PRIVATE
+    SaneTests.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/Sane/Source/SaneParams.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/Sane/Source/PluginProcessor.cpp
+    ${CMAKE_SOURCE_DIR}/plugins/Sane/Source/PluginEditor.cpp)
+target_include_directories(SaneTests PRIVATE ${CMAKE_SOURCE_DIR}/plugins/Sane/Source)
+target_compile_definitions(SaneTests PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(SaneTests PRIVATE
+    juce::juce_audio_utils
+    pvst_shared
+    juce::juce_recommended_config_flags
+    juce::juce_recommended_warning_flags)
+
+add_test(NAME SaneTests COMMAND SaneTests)

@@ -2,17 +2,17 @@
 
 _Last updated: 2026-10-17 (session 3)_
 
-## NEW: Sane (drum plugin, feedback synthesis) — MOCKUP 2 waiting for the user's verdict
-Research + options + user decisions: `docs/DRUM_RESEARCH.md`. Nothing built yet.
-Mockup (design canvas, interactive): https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau — source copy
-`docs/mockups/sane/Main.dc.html`. v2 = brown displays (#7E705A), aligned grid (all borders meet), per-note noise
-re-roll + vel/key mods, strike vel/key → position, empty "+ ADD FX" slot + type picker, drag-swap slots, Modes
-morph between selectable endpoints A/B (Physical / Calc / File / Linked), draggable pitch-drop + length
-handles, keys/pads light up on press and fade on release, kit list as a right-side drawer, link popover
-(groups, leader ★, what is shared, conflict rule).
-**Open question for the user:** link conflict rule — ★ leader wins (recommended) / last change wins /
-automation unlinks.
-**Next:** user verdict on mockup 2 → (revise) → build v0.1 (noise exciter + membrane FDN core + 4 inserts).
+## Sane v0.1.0 — IN PROGRESS (engine done + tested, real UI not yet)
+Design: `docs/DRUM_RESEARCH.md` + mockup https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau (`docs/mockups/sane/`).
+User approved mockup 2, picked link-conflict rule "★ leader wins", said "let's hear it".
+**Done:** `plugins/Sane/` — SaneParams (all params), SaneDsp (mode tables, burst, 9 insert types), SaneEngine
+(12 voices; cores Delay 1 loop / Membrane 8-line FDN / Partials 16 band-passed loops; inserts inside every
+loop; per-note noise; strike vel/key; drawn pitch drop + energy tension; length; governor; in-loop DC blocker),
+PluginProcessor. `tools/SaneTests.cpp`: all checks pass (pitch within 0.1 c in every core). CPU worst case
+(12 voices x 16 loops x 5 inserts) ~71 % of one core → optimise later.
+**Half-done:** PluginEditor is a TEMPORARY generic editor. **Next concrete step:** write the desert UI
+(mockup 2 layout: exciter / loop ring + slots / modes / strike / slot editor / hit / keys strip), then
+docs + push to main. v0.1 leaves out: kit drawer, link groups, scale keys (12-EDO for now), Pick/Dyn EQ/Air.
 
 ## Seed v0.7.0 — feedback batch 2 (drawn LFOs, modulate everything, locks, window scale)
 Design + HOW TO USE: `docs/PLAYGROUND.md` ("v0.7.0 changes"). 163 headless checks pass

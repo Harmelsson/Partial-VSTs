@@ -7,7 +7,7 @@ Design: `docs/DRUM_RESEARCH.md`, mockup `docs/mockups/sane/` (https://claude.ai/
 Code: `plugins/Sane/` (README there). Tests: `tools/SaneTests.cpp` — all pass (pitch within 0.1 c in every core,
 safety at every extreme incl. self-oscillation, click-free morph, levels, tension/pitch drop/length, state).
 CPU (Linux): default patch with 12 ringing voices ~18 % of a core; heaviest (Partials, 5 inserts) ~59 %.
-**Download:** the newest Release (contains Seed.vst3 AND Sane.vst3). First time: FL → Manage plugins → Find installed.
+**Download:** Release `build-21` (CI green on Windows incl. Seed + Sane tests): https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-21 — contains Seed.vst3 AND Sane.vst3. First time: FL → Manage plugins → Find installed.
 
 ### User should test (listen for)
 1. **Basics:** play low keys (C1–C3). Membrane core = tom-ish. Window opens at 90 % (− / + top right).

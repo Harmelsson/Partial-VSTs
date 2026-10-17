@@ -386,3 +386,5 @@ noise, strike vel/key, drawn pitch drop + energy tension, length, governor) + de
    → lossless Givens rotations between neighbouring lines.
 6. Bar table formula approximated mode 2 as 2.778 (should be 2.756) → exact beta values for the first modes.
 Decisions: v0.1 leaves out kit drawer, link groups (rule ★ leader wins recorded), Seed scale keys, Pick/Dyn EQ/Air slots.
+- 12:00 check-in: CI run #21 (main, Sane v0.1.0) green on Windows incl. SaneTests + SeedTests; Release `build-21` published.
+  Build step took 26 min (was ~9 with Seed alone): two plugins with LTO, and a parallel branch run sharing the runner pool.

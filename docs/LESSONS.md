@@ -122,3 +122,8 @@ without CLAUDE.md on main it doesn't even know to look at other branches). Alway
 - **Measure glides early**: an energy-driven pitch glide is mostly over after ~20 ms; analysis windows must start at ~5 ms.
 - **Analyse rendered WAVs numerically** (peaks, sub-band energy, decay per window) — it caught 3 problems the pass/fail
   tests didn't (quiet cores, rumble, fast membrane decay). `SaneTests --wav dir` + numpy in the container.
+
+## CI timing (2026-10-17)
+- With Seed + Sane (both LTO, VST3 + Standalone, two test apps) the Windows Build step takes ~26 min. Pushing the same
+  commit to the branch AND main starts two full runs. Plan check-ins ~30 min after a push. Possible speed-up: drop LTO
+  for the test apps, or only build Releases from main.

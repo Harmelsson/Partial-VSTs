@@ -127,3 +127,12 @@ without CLAUDE.md on main it doesn't even know to look at other branches). Alway
 - With Seed + Sane (both LTO, VST3 + Standalone, two test apps) the Windows Build step takes ~26 min. Pushing the same
   commit to the branch AND main starts two full runs. Plan check-ins ~30 min after a push. Possible speed-up: drop LTO
   for the test apps, or only build Releases from main.
+- **A dry/wet mix INSIDE a feedback loop is a filter, not a mix**: for time-varying effects (freq shift, chorus) the dry and
+  wet copies interfere on every pass and drain the loop (thin tail at 50 %). In loops: fully wet + an intensity knob.
+- **Calibrate the loop-internal level** before judging nonlinear inserts: at 0.05 a tanh saturator is a straight wire.
+  Measure it (probe) per core and normalise to ~1.0.
+- **Separate "timbre" controls from "loudness"**: strike position and burst length must keep energy constant, otherwise
+  they fight velocity. Measure loudness as energy over a window, never as peak, when the number of modes differs.
+- **Order matters for "after" effects**: anything placed after a distortion (here a high-pass) reshapes it. Put user
+  after-effects last in the voice chain.
+- **Voice-end detection with long loops**: silence between repeats is not the end — wait longer than one loop pass.

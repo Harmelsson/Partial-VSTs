@@ -6,14 +6,29 @@
 //   Button   a plain chip that runs a callback
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "SaneLook.h"
+#include "SaneParams.h"
 
 namespace sane::ui
 {
-/// Keeps a slider and a parameter in sync, with default-on-double-click.
+/// A slider that goes back to its default on a MIDDLE click (and on a double-click).
+class ResetSlider : public juce::Slider
+{
+public:
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isMiddleButtonDown() && isDoubleClickReturnEnabled()) { setValue (getDoubleClickReturnValue(), juce::sendNotificationSync); return; }
+        juce::Slider::mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override { if (! e.mods.isMiddleButtonDown()) juce::Slider::mouseDrag (e); }
+    void mouseUp (const juce::MouseEvent& e) override { if (! e.mods.isMiddleButtonDown()) juce::Slider::mouseUp (e); }
+};
+
+/// Keeps a slider and a parameter in sync: default on double-click / middle-click, hover help.
 inline void bindDefaults (juce::Slider& s, juce::RangedAudioParameter& p)
 {
     s.setDoubleClickReturnValue (true, p.convertFrom0to1 (p.getDefaultValue()));
-    s.setTooltip (p.getName (64));
+    const auto help = helpText (p.getParameterID());
+    s.setTooltip (p.getName (64) + (help.isEmpty() ? juce::String() : "\n" + help) + "\n(double- or middle-click = default)");
 }
 
 class Knob : public juce::Component, private juce::Timer
@@ -51,7 +66,7 @@ public:
     {
         look::drawLabel (g, name, getLocalBounds().removeFromTop (13));
         g.setColour (look::ink);
-        g.setFont (look::mono (11.5f, true));
+        g.setFont (look::mono (12.5f, true));
         const auto txt = valueText ? valueText (param->getValue()) : param->getCurrentValueAsText();
         g.drawText (txt, getLocalBounds().removeFromBottom (14), juce::Justification::centred, false);
     }
@@ -64,7 +79,7 @@ private:
     }
     juce::RangedAudioParameter* param;
     juce::String name;
-    juce::Slider slider;
+    ResetSlider slider;
     std::unique_ptr<juce::SliderParameterAttachment> att;
     float shown = -1.0f;
 };
@@ -94,7 +109,7 @@ public:
         auto r = getLocalBounds();
         look::drawLabel (g, name, r.removeFromLeft (labelWidth), juce::Justification::centredLeft);
         g.setColour (look::ink);
-        g.setFont (look::mono (11.0f, true));
+        g.setFont (look::mono (12.0f, true));
         g.drawText (param.getCurrentValueAsText(), r.removeFromRight (valueWidth), juce::Justification::centredRight, false);
     }
 
@@ -106,12 +121,12 @@ private:
     }
     juce::RangedAudioParameter& param;
     juce::String name;
-    juce::Slider slider;
+    ResetSlider slider;
     std::unique_ptr<juce::SliderParameterAttachment> att;
     float shown = -1.0f;
 };
 
-class Chips : public juce::Component
+class Chips : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     Chips (juce::RangedAudioParameter& p, juce::StringArray labels, float fontSize = 11.0f)
@@ -120,6 +135,7 @@ public:
     {
         enabled.resize ((size_t) items.size(), true);
         att.sendInitialUpdate();
+        setTooltip (p.getName (64) + "\n" + helpText (p.getParameterID()));
     }
     void setItemEnabled (int i, bool e) { if (i >= 0 && i < (int) enabled.size()) enabled[(size_t) i] = e; repaint(); }
     std::function<void()> onChange;
@@ -148,6 +164,7 @@ public:
     void mouseExit (const juce::MouseEvent&) override { hover = -1; repaint(); }
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (e.mods.isMiddleButtonDown()) { att.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue())); return; }
         const int i = itemAt (e.x);
         if (i < 0 || ! enabled[(size_t) i]) return;
         att.setValueAsCompleteGesture ((float) i);
@@ -173,7 +190,7 @@ private:
     juce::ParameterAttachment att;
 };
 
-class Button : public juce::Component
+class Button : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     Button (juce::String t, std::function<void()> click) : text (std::move (t)), onClick (std::move (click)) {}

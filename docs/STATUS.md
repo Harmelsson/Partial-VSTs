@@ -2,28 +2,29 @@
 
 _Last updated: 2026-10-17 (session 3)_
 
-## Sane v0.1.0 — user tested ("good direction, needs serious rework") → v0.2 PLAN waiting for OK
-**Next:** user answers the questions in `docs/SANE_V02_PLAN.md` (modulation approach, mockup 3 or build) → build v0.2 in the order of section 4.
+## Sane v0.2.0 (step 1 of the rework) — waiting for the user's ears
+Plan + diagnosis: `docs/SANE_V02_PLAN.md`. User decisions 2026-10-18: Seed-style drag-and-drop modulation; mockup 3 for the
+exciter / EQ / modulation areas before building them; **modulation row goes on the bottom, above the keyboard**.
+**Done in v0.2.0:** LOOP TIME (Keys / Hz / ms / BPM + key track; Delay core up to 2.1 s = echo-like), DIRECT (dry hit) knob,
+output tapped after the loop processing (no raw noise unless DIRECT), every slot IN LOOP or AFTER LOOP, remove (×) + "off"
+in the picker, per-type knob defaults, in-loop freq shift / chorus / ring mod always wet with C = spread (no thin tail),
+loop level calibrated to ~1.0 (saturate / fold bite), velocity = loudness / position = timbre, hover help on every control,
+middle-click = default, INIT button, bigger / darker text. Tests: all pass (`tools/SaneTests.cpp`, v0.2 section).
+CPU (Linux): default 12 voices ~28 %; extreme (Partials, 5 slots incl. freq shift + chorus, 12 voices) ~83 % → optimise in v0.3.
+**Next:** mockup 3 (exciter envelope + lock/random + 3-band tone, 5-band dynamic EQ, modulation row above the keys) → build.
 
-Design: `docs/DRUM_RESEARCH.md`, mockup `docs/mockups/sane/` (https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau).
-Code: `plugins/Sane/` (README there). Tests: `tools/SaneTests.cpp` — all pass (pitch within 0.1 c in every core,
-safety at every extreme incl. self-oscillation, click-free morph, levels, tension/pitch drop/length, state).
-CPU (Linux): default patch with 12 ringing voices ~18 % of a core; heaviest (Partials, 5 inserts) ~59 %.
-**Download:** Release `build-21` (CI green on Windows incl. Seed + Sane tests): https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-21 — contains Seed.vst3 AND Sane.vst3. First time: FL → Manage plugins → Find installed.
-
-### User should test (listen for)
-1. **Basics:** play low keys (C1–C3). Membrane core = tom-ish. Window opens at 90 % (− / + top right).
-2. **Every note is different:** repeat one key — the noise changes each time (Exciter shows the last 3 in black).
-   "random per note" = how much.
-3. **Strike:** soft notes ring "edgier", hard notes "thumpier" (velocity → position). Click the round head to move the base.
-4. **Cores:** Membrane / Partials (pure, bell/tabla-like) / Delay (plucky, string-like until Disperse or Flip).
-5. **Loop slots:** click a slot, change its type (TYPE ▾) and knobs WHILE a note rings; drag a slot onto another to swap.
-   Try Flip (50 % = noise drum), Freq Shift (spirals), Fold, Ring Mod. FEEDBACK at the very top = self-oscillation
-   (holds while the key is held, stops on release).
-6. **Modes:** A = Physical (pick Membrane/Timpani/Tabla/Bar/Plate), B = Calc (seed); slide MORPH while ringing.
-7. **Hit:** drag the black squares (pitch drop amount / time) and the white one (length). TENSION = hard hits start sharp.
-8. **Keys strip:** click keys (low on a key = loud); they light up and fade.
-Not in v0.1 (shown dashed): kit drawer, link groups, scale keys (12-EDO for now), audio-in exciter, picked-partial targeting.
+### What to listen for (v0.2.0) — the "FX feel flat" checklist
+1. **INIT** first. One Membrane hit = the plain loop. Now add one slot at a time and compare with INIT.
+2. **Saturate IN LOOP**, drive 50 %+: the ring gets denser and brighter the harder you hit, and decays "compressed".
+   Same slot **AFTER LOOP**: classic distortion on the output (the ring itself stays clean). Compare to any distortion plugin.
+3. **Freq Shift IN LOOP**: shift ±, range small (2–10 Hz): every pass moves the overtones → a rising / falling "laser" swirl;
+   SPREAD detunes each loop line differently. The tail should NOT get thin anymore at any setting.
+4. **Disperse**: amount up, colour bright → overtones stretch apart (metallic, bell); colour dark → they squeeze together.
+5. **Filter IN LOOP**: low-pass lower = the ring gets darker on every pass (felt / hand damping). Resonance up = a whistling mode.
+6. **Loop TIME**: switch to Hz / ms: all keys ring the same loop (classic delay); KEY TRACK brings the keys back.
+   Delay core + BPM + 1/8 + feedback ~60 %: a rhythmic echo drum that follows FL's tempo.
+7. **DIRECT**: off = only the loop; up = the stick / noise attack on top.
+8. Hover any control for its description; middle-click resets it.
 
 ## Seed v0.7.0 — feedback batch 2 (drawn LFOs, modulate everything, locks, window scale)
 Design + HOW TO USE: `docs/PLAYGROUND.md` ("v0.7.0 changes"). 163 headless checks pass

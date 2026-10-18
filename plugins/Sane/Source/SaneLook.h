@@ -14,8 +14,8 @@ inline const juce::Colour ground { 0xffbdae8b };
 inline const juce::Colour ink { 0xff121110 };
 inline const juce::Colour paper { 0xfff6f3ea };
 inline const juce::Colour disp { 0xff7e705a };
-inline const juce::Colour dim { 0xff3b3428 };   // secondary text on the ground
-inline const juce::Colour dispText = paper.withAlpha (0.88f);
+inline const juce::Colour dim { 0xff2a251c };   // secondary text on the ground (v0.2: darker = more contrast)
+inline const juce::Colour dispText = paper.withAlpha (0.95f);
 
 inline juce::String u8 (const char* s) { return juce::String::fromUTF8 (s); }
 
@@ -48,7 +48,7 @@ inline void drawLabel (juce::Graphics& g, const juce::String& text, juce::Rectan
                        juce::Colour c = dim)
 {
     g.setColour (c);
-    g.setFont (caps (10.5f));
+    g.setFont (caps (11.5f));
     g.drawText (text.toUpperCase(), r, j, false);
 }
 

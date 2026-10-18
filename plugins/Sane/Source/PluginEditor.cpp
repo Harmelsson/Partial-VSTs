@@ -12,11 +12,13 @@ constexpr int kPad = 13;
 
 SaneEditor::SaneEditor (SaneProcessor& p)
     : AudioProcessorEditor (p), proc (p),
+      initBtn ("init", [this] { initPatch(); }),
       kitBtn (L::u8 ("kit \xc2\xb7 v0.2"), [] {}), tunedBtn ("tuned", [] {}), linkBtn (L::u8 ("link \xc2\xb7 v0.2"), [] {}),
       scaleDown (L::u8 ("\xe2\x88\x92"), [this] { setUiScale (uiScale - 0.1f); }), scaleUp ("+", [this] { setUiScale (uiScale + 0.1f); }),
       noiseBtn ("noise", [] {}), audioBtn (L::u8 ("audio in \xc2\xb7 later"), [] {}),
       exciter (p),
       coreChips (p.param (ids::core), { "membrane", "partials", "delay" }),
+      timeChips (p.param (ids::loopMode), { "keys", "hz", "ms", "bpm" }),
       ring (p, [this] (int s) { slotEditor.setSlot (s); }),
       tableChips (p.param (ids::table), { "membrane", "timpani", "tabla", "bar", "plate" }, 10.0f),
       srcAChips (p.param (ids::srcA), { "physical", "calc", "file", "linked" }, 10.5f),
@@ -29,19 +31,21 @@ SaneEditor::SaneEditor (SaneProcessor& p)
     tunedBtn.on = true;
     kitBtn.isEnabled = linkBtn.isEnabled = false;
     noiseBtn.on = true; audioBtn.isEnabled = false;
-    for (auto* c : std::initializer_list<juce::Component*> { &kitBtn, &tunedBtn, &linkBtn, &scaleDown, &scaleUp, &noiseBtn, &audioBtn, &exciter,
+    initBtn.setTooltip ("INIT: a neutral patch. Nothing random, no velocity / key effects, no slots, plain membrane.");
+    for (auto* c : std::initializer_list<juce::Component*> { &initBtn, &timeChips, &kitBtn, &tunedBtn, &linkBtn, &scaleDown, &scaleUp, &noiseBtn, &audioBtn, &exciter,
                                                              &coreChips, &ring, &tableChips, &srcAChips, &srcBChips, &modes, &morphBar,
                                                              &strike, &slotEditor, &hit, &keys })
         addAndMakeVisible (c);
 
-    auto knob = [&] (std::vector<std::unique_ptr<ui::Knob>>& v, const char* id, const char* label) {
+    auto knob = [&] (std::vector<std::unique_ptr<ui::Knob>>& v, const char* id, const juce::String& label) {
         v.push_back (std::make_unique<ui::Knob> (p.param (id), label));
         addAndMakeVisible (*v.back());
     };
-    knob (excKnobs, ids::exColor, "colour"); knob (excKnobs, ids::exLength, "length"); knob (excKnobs, ids::exGrain, "grain"); knob (excKnobs, ids::exLevel, "level");
+    knob (excKnobs, ids::exColor, "colour"); knob (excKnobs, ids::exLength, "length"); knob (excKnobs, ids::exGrain, "grain");
+    knob (excKnobs, ids::exLevel, L::u8 ("\xe2\x86\x92 loop")); knob (excKnobs, ids::exDirect, "direct");
     knob (loopKnobs, ids::feedback, "feedback"); knob (loopKnobs, ids::damp, "damp"); knob (loopKnobs, ids::tension, "tension");
     knob (loopKnobs, ids::coupling, "coupling"); knob (loopKnobs, ids::width, "width");
-    knob (modeKnobs, ids::calcSeed, "calc seed"); knob (modeKnobs, ids::rolloff, "rolloff"); knob (modeKnobs, ids::tune, "tune");
+    knob (modeKnobs, ids::calcSeed, "seed"); knob (modeKnobs, ids::rolloff, "rolloff"); knob (modeKnobs, ids::tune, "tune");
     knob (modeKnobs, ids::fine, "fine"); knob (modeKnobs, ids::bendRange, "bend"); knob (modeKnobs, ids::gain, "output");
 
     auto bar = [&] (std::vector<std::unique_ptr<ui::Bar>>& v, const char* id, const juce::String& label) {
@@ -55,8 +59,13 @@ SaneEditor::SaneEditor (SaneProcessor& p)
     bar (strikeBars, ids::stKey, L::u8 ("key \xe2\x86\x92 pos")); bar (strikeBars, ids::stRandom, "random pos");
     morphBar.labelWidth = 104;
 
-    // Linked has no link groups yet (v0.2): it uses the Calc partials meanwhile — still selectable.
+    // Linked has no link groups yet: it uses the Calc partials meanwhile — still selectable.
     coreChips.onChange = [this] { repaint(); };
+    timeKnob = std::make_unique<ui::Knob> (p.param (ids::loopHz), "time");
+    keyTrackKnob = std::make_unique<ui::Knob> (p.param (ids::keyTrack), "key track");
+    addAndMakeVisible (*timeKnob); addAndMakeVisible (*keyTrackKnob);
+    timeChips.onChange = [this] { updateTimeKnob(); resized(); repaint(); };
+    updateTimeKnob();
 
     // 90 % by default so the window fits a laptop screen inside FL; the user's choice is remembered in the project
     uiScale = (float) proc.apvts.state.getProperty ("uiScale", 0.9f);
@@ -75,6 +84,38 @@ void SaneEditor::setUiScale (float s)
     repaint();
 }
 
+void SaneEditor::updateTimeKnob()
+{
+    const int mode = (int) proc.value (ids::loopMode);
+    if (mode == shownTimeMode) return;
+    shownTimeMode = mode;
+    const char* id = mode == LoopMs ? ids::loopMs : (mode == LoopBpm ? ids::loopBeat : ids::loopHz);
+    timeKnob->attach (proc.param (id), "time");
+    // Keys mode: the played key IS the loop time, so the time / key track knobs have nothing to do
+    timeKnob->setVisible (mode != LoopKeys);
+    keyTrackKnob->setVisible (mode != LoopKeys);
+}
+
+void SaneEditor::initPatch()
+{
+    // every parameter to its default first ...
+    for (auto* ap : proc.getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (ap))
+        {
+            rp->beginChangeGesture(); rp->setValueNotifyingHost (rp->getDefaultValue()); rp->endChangeGesture();
+        }
+    // ... then neutral: nothing random, nothing velocity / key dependent, no slots, no drawn pitch drop
+    auto set = [this] (const juce::String& id, float v) {
+        auto& p = proc.param (id);
+        p.beginChangeGesture(); p.setValueNotifyingHost (p.convertTo0to1 (v)); p.endChangeGesture();
+    };
+    for (auto* id : { ids::exRandom, ids::exVelRandom, ids::exVelLength, ids::exKeyColor, ids::exSpread, ids::stVel, ids::stKey,
+                      ids::stRandom, ids::pitchAmt, ids::tension })
+        set (id, 0.0f);
+    set (ids::exDirect, -60.0f);
+    for (int sl = 1; sl <= kNumSlots; ++sl) set (ids::slot (sl, "type"), 0.0f);
+}
+
 void SaneEditor::resized()
 {
     const int x1 = kLine, x2 = x1 + kCol1 + kLine, x3 = x2 + kCol2 + kLine;
@@ -86,6 +127,7 @@ void SaneEditor::resized()
     // header (right side)
     {
         auto h = juce::Rectangle<int> (kLine, kLine, kW - 2 * kLine, kHeader).reduced (14, 15);
+        initBtn.setBounds (360, h.getY(), initBtn.preferredWidth() + 10, h.getHeight());
         scaleUp.setBounds (h.removeFromRight (28)); h.removeFromRight (52);
         scaleDown.setBounds (h.removeFromRight (28)); h.removeFromRight (76);
         linkBtn.setBounds (h.removeFromRight (linkBtn.preferredWidth())); h.removeFromRight (18);
@@ -102,7 +144,7 @@ void SaneEditor::resized()
         exciter.setBounds (r.removeFromTop (104));
         r.removeFromTop (8);
         auto kr = r.removeFromTop (71);
-        const int kw = kr.getWidth() / 4;
+        const int kw = kr.getWidth() / (int) excKnobs.size();
         for (auto& k : excKnobs) k->setBounds (kr.removeFromLeft (kw));
         r.removeFromTop (30); // separator + "new noise on every note"
         for (auto& b : excBars) { b->labelWidth = 128; b->setBounds (r.removeFromTop (24)); }
@@ -113,11 +155,17 @@ void SaneEditor::resized()
         auto top = r.removeFromTop (22);
         top.removeFromLeft (70);
         coreChips.setBounds (top.removeFromLeft (coreChips.preferredWidth()));
-        r.removeFromTop (16);
-        ring.setBounds (r.removeFromTop (330));
+        r.removeFromTop (4);
+        auto tr = r.removeFromTop (22);
+        tr.removeFromLeft (70);
+        timeChips.setBounds (tr.removeFromLeft (timeChips.preferredWidth()));
+        r.removeFromTop (2);
+        ring.setBounds (r.removeFromTop (318));
         r.removeFromTop (2);
         auto kr = r.removeFromTop (71);
-        for (auto& k : loopKnobs) k->setBounds (kr.removeFromLeft (76));
+        for (auto& k : loopKnobs) k->setBounds (kr.removeFromLeft (74));
+        timeKnob->setBounds (kr.removeFromLeft (74));
+        keyTrackKnob->setBounds (kr.removeFromLeft (74));
     }
     // modes
     {
@@ -192,14 +240,19 @@ void SaneEditor::paint (juce::Graphics& g)
         const char* hints[] = { "8 coupled fine delays (feedback delay network): modes emerge, pulled toward the Modes targets",
                                 "one tiny loop per mode, exactly at the positions shown in Modes",
                                 "one loop (Karplus-Strong family): harmonic until an insert (Disperse, Flip...) breaks it" };
-        g.setColour (L::dim); g.setFont (L::mono (10.5f));
-        g.drawText (hints[juce::jlimit (0, 2, core)], cLoop.getX() + kPad, cLoop.getY() + kPad + 24, cLoop.getWidth() - 2 * kPad, 13, juce::Justification::left, true);
+        L::drawLabel (g, "time", { cLoop.getX() + kPad, timeChips.getY(), 64, 22 }, juce::Justification::centredLeft, L::ink);
+        const int tm = (int) proc.value (ids::loopMode);
+        const juce::String timeHint = tm == LoopKeys ? juce::String ("the played key sets the loop length (pitched drum)")
+                                    : (tm == LoopBpm ? juce::String ("loop length = a tempo division (Delay core: up to 2 s, echo-like)")
+                                                     : juce::String ("a fixed loop length, like a delay; KEY TRACK bends it with the keys"));
+        g.setColour (L::dim); g.setFont (L::mono (11.0f));
+        g.drawText (timeHint, timeChips.getRight() + 10, timeChips.getY(), cLoop.getRight() - kPad - timeChips.getRight() - 10, 22, juce::Justification::centredLeft, true);
+        coreChips.setTooltip (juce::String ("LOOP CORE\n") + hints[juce::jlimit (0, 2, core)]);
         L::drawLabel (g, "loop gain", { cLoop.getRight() - kPad - 170, cLoop.getY() + kPad, 90, 22 }, juce::Justification::centredRight);
         g.setColour (L::ink); g.setFont (L::mono (12.0f, true));
         g.drawText (proc.param (ids::feedback).getCurrentValueAsText(), cLoop.getRight() - kPad - 76, cLoop.getY() + kPad, 76, 22, juce::Justification::centredRight, false);
-        g.setColour (L::dim); g.setFont (L::mono (10.0f));
-        g.drawText ("governor: always on", cLoop.getRight() - kPad - 140, cLoop.getBottom() - kPad - 40, 140, 13, juce::Justification::right, false);
-        g.drawText ("drag a slot onto another = swap", cLoop.getRight() - kPad - 190, cLoop.getBottom() - kPad - 24, 190, 13, juce::Justification::right, false);
+        g.setColour (L::dim); g.setFont (L::mono (10.5f));
+        g.drawText ("drag a slot onto another = swap", cLoop.getX() + kPad, ring.getBottom() - 14, 260, 13, juce::Justification::left, false);
     }
     // modes
     L::drawTitle (g, "modes", cModes.getX() + kPad, cModes.getY() + kPad + 3);

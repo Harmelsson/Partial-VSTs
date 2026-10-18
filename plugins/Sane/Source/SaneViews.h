@@ -392,7 +392,7 @@ public:
     void swapSlots (int a, int b)
     {
         if (a == b) return;
-        for (auto* nm : { "type", "a", "b", "c" })
+        for (auto* nm : { "type", "a", "b", "c", "place" })
         {
             auto& pa = proc.param (ids::slot (a + 1, nm));
             auto& pb = proc.param (ids::slot (b + 1, nm));
@@ -403,6 +403,12 @@ public:
         select (b);
     }
     void select (int s) { selected = s; for (auto& t : tiles) t->repaint(); if (onSelect) onSelect (s); }
+    void removeSlot (int s)
+    {
+        auto& p = proc.param (ids::slot (s + 1, "type"));
+        p.beginChangeGesture(); p.setValueNotifyingHost (p.convertTo0to1 (0.0f)); p.endChangeGesture();
+        select (s);
+    }
 
 private:
     struct Tile : public juce::Component
@@ -436,12 +442,28 @@ private:
                 look::fillDisp (g, gr);
                 drawSlotGraph (g, gr.toFloat().reduced (2.0f, 2.0f), type, owner.proc.value (ids::slot (slot + 1, "a")),
                                owner.proc.value (ids::slot (slot + 1, "b")), owner.proc.value (ids::slot (slot + 1, "c")), false);
-                g.setColour (ink); g.setFont (look::mono (10.0f, true));
-                g.drawText (slotValueText (type, 0, owner.proc.value (ids::slot (slot + 1, "a"))), in.getX(), in.getBottom() - 12, in.getWidth(), 12, juce::Justification::left, true);
+                g.setColour (ink); g.setFont (look::mono (10.5f, true));
+                const int place = (int) owner.proc.value (ids::slot (slot + 1, "place"));
+                g.drawText (slotValueText (type, 0, owner.proc.value (ids::slot (slot + 1, "a")), place), in.getX(), in.getBottom() - 12, in.getWidth() - 34, 12, juce::Justification::left, true);
+                // where it runs: inside the loop (every pass) or after it (once)
+                g.setFont (look::caps (9.5f));
+                g.drawText (place == PlaceLoop ? "LOOP" : "AFTER", in.getRight() - 34, in.getBottom() - 12, 34, 12, juce::Justification::right, false);
+                if (sel) // remove cross
+                {
+                    const auto x = removeArea().toFloat().reduced (3.0f);
+                    g.drawLine (x.getX(), x.getY(), x.getRight(), x.getBottom(), 1.6f);
+                    g.drawLine (x.getRight(), x.getY(), x.getX(), x.getBottom(), 1.6f);
+                }
             }
             if (dropHover) { g.setColour (ink); g.drawRect (r, 3); }
         }
-        void mouseDown (const juce::MouseEvent&) override { owner.select (slot); }
+        juce::Rectangle<int> removeArea() const { return { getWidth() - 16, 2, 14, 14 }; }
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            const int type = (int) owner.proc.value (ids::slot (slot + 1, "type"));
+            if (owner.selected == slot && type != SlotOff && removeArea().contains (e.getPosition())) { owner.removeSlot (slot); return; }
+            owner.select (slot);
+        }
         void mouseDrag (const juce::MouseEvent& e) override
         {
             if (e.getDistanceFromDragStart() < 6) return;
@@ -576,18 +598,24 @@ class SlotEditor : public juce::Component, private juce::Timer
 public:
     explicit SlotEditor (SaneProcessor& p) : proc (p),
         typeBtn (look::u8 ("type \xe2\x96\xbe"), [this] { picker = ! picker; layoutPicker(); repaint(); }),
-        wholeBtn ("whole loop", [] {}), picksBtn (look::u8 ("picked partials \xc2\xb7 v0.2"), [] {})
+        removeBtn (look::u8 ("\xc3\x97 remove"), [this] { setType (SlotOff); })
     {
-        wholeBtn.on = true; picksBtn.isEnabled = false;
-        for (auto* b : { &typeBtn, &wholeBtn, &picksBtn }) addAndMakeVisible (*b);
+        typeBtn.setTooltip ("Choose the effect in this slot.");
+        removeBtn.setTooltip ("Remove the effect from this slot (the slot becomes empty).");
+        for (auto* b : { &typeBtn, &removeBtn }) addAndMakeVisible (*b);
+        for (int s = 0; s < kNumSlots; ++s)   // one placement switch per slot; only the selected slot's is shown
+        {
+            placeChips.push_back (std::make_unique<Chips> (p.param (ids::slot (s + 1, "place")), juce::StringArray { "in loop", "after loop" }));
+            addChildComponent (*placeChips.back());
+        }
         for (int k = 0; k < 3; ++k)
         {
             knobs[(size_t) k] = std::make_unique<Knob> (p.param (ids::slot (1, k == 0 ? "a" : (k == 1 ? "b" : "c"))), "-");
             addAndMakeVisible (*knobs[(size_t) k]);
         }
-        for (int t = 1; t < slotTypeNames().size(); ++t)
+        for (int t = 0; t < slotTypeNames().size(); ++t)
         {
-            auto b = std::make_unique<Button> (slotTypeNames()[t], [this, t] { setType (t); });
+            auto b = std::make_unique<Button> (t == 0 ? look::u8 ("off \xc2\xb7 remove") : slotTypeNames()[t], [this, t] { setType (t); });
             addChildComponent (*b);
             typeButtons.push_back (std::move (b));
         }
@@ -598,6 +626,7 @@ public:
     void setSlot (int s)
     {
         slot = s;
+        for (int k = 0; k < kNumSlots; ++k) placeChips[(size_t) k]->setVisible (k == s);
         for (int k = 0; k < 3; ++k)
             knobs[(size_t) k]->attach (proc.param (ids::slot (s + 1, k == 0 ? "a" : (k == 1 ? "b" : "c"))));
         lastType = -1;
@@ -611,9 +640,7 @@ public:
     {
         auto r = getLocalBounds();
         auto top = r.removeFromTop (22);
-        picksBtn.setBounds (top.removeFromRight (picksBtn.preferredWidth()));
-        top.removeFromRight (4);
-        wholeBtn.setBounds (top.removeFromRight (wholeBtn.preferredWidth()));
+        for (auto& pc : placeChips) pc->setBounds (getWidth() - pc->preferredWidth(), 0, pc->preferredWidth(), 22);
         graph = r.removeFromTop (164).withTrimmedTop (6);
         r.removeFromTop (4);
         const int kw = 90;
@@ -626,7 +653,10 @@ public:
         const int type = currentType();
         const int w = look::drawTitle (g, "slot " + juce::String (slot + 1) + look::u8 (" \xc2\xb7 ") + (type == SlotOff ? juce::String ("empty") : slotTypeNames()[type]), 0, 3);
         typeBtn.setBounds (w + 6, 0, typeBtn.preferredWidth(), 22);
-        look::drawLabel (g, "acts on", juce::Rectangle<int> (wholeBtn.getX() - 64, 0, 60, 22), juce::Justification::centredRight);
+        removeBtn.setBounds (typeBtn.getRight() + 4, 0, removeBtn.preferredWidth(), 22);
+        removeBtn.setVisible (type != SlotOff);
+        const int px = placeChips[(size_t) slot]->getX();
+        look::drawLabel (g, "runs", juce::Rectangle<int> (px - 50, 0, 46, 22), juce::Justification::centredRight);
         look::fillDisp (g, graph);
         if (! picker && type != SlotOff)
         {
@@ -642,19 +672,28 @@ public:
         }
         auto info = getLocalBounds().withTop (graph.getBottom() + 8).withTrimmedLeft (290);
         g.setColour (look::dim); g.setFont (look::sans (13.0f));
-        g.drawFittedText (type == SlotOff ? "An empty slot passes the loop through unchanged."
-                                          : "Drag a slot on the ring onto another to swap them. Every change is heard live on ringing notes.",
-                          info.reduced (4, 10), juce::Justification::topLeft, 3);
+        const bool inLoop = currentPlace() == PlaceLoop;
+        g.drawFittedText (type == SlotOff ? "An empty slot passes the sound through unchanged."
+                          : (inLoop ? "IN LOOP: runs on every pass, so it shapes the ring itself. Small settings already change a lot."
+                                    : "AFTER LOOP: runs once on the output, like a normal effect (C = dry/wet mix)."),
+                          info.reduced (4, 6), juce::Justification::topLeft, 4);
     }
 
 private:
     int currentType() const { return (int) proc.value (ids::slot (slot + 1, "type")); }
+    int currentPlace() const { return (int) proc.value (ids::slot (slot + 1, "place")); }
     float val (const char* k) const { return proc.value (ids::slot (slot + 1, k)); }
 
     void setType (int t)
     {
-        auto& p = proc.param (ids::slot (slot + 1, "type"));
-        p.beginChangeGesture(); p.setValueNotifyingHost (p.convertTo0to1 ((float) t)); p.endChangeGesture();
+        auto set = [this] (const char* nm, float v) {
+            auto& p = proc.param (ids::slot (slot + 1, nm));
+            p.beginChangeGesture(); p.setValueNotifyingHost (p.convertTo0to1 (v)); p.endChangeGesture();
+        };
+        set ("type", (float) t);
+        // fresh knob values that make sense for the new effect (no meaning carried over from the old one)
+        const auto d = slotDefaults (t);
+        set ("a", d.a); set ("b", d.b); set ("c", d.c);
         picker = false;
         layoutPicker();
         repaint();
@@ -662,30 +701,28 @@ private:
 
     void layoutPicker()
     {
-        const int cols = 3, gap = 6;
+        const int cols = 4, gap = 6;
         auto area = graph.reduced (10).withTrimmedTop (18);
-        const int bw = (area.getWidth() - gap * (cols - 1)) / cols, bh = 30;
+        const int bw = (area.getWidth() - gap * (cols - 1)) / cols, bh = 28;
         for (size_t i = 0; i < typeButtons.size(); ++i)
         {
             auto& b = *typeButtons[i];
             b.setBounds (area.getX() + (int) (i % cols) * (bw + gap), area.getY() + (int) (i / cols) * (bh + gap), bw, bh);
-            b.on = (int) i + 1 == currentType();
+            b.on = (int) i == currentType();
             b.setVisible (picker);
         }
     }
 
     void timerCallback() override
     {
-        const int t = currentType();
-        if (t != lastType)
+        const int t = currentType(), pl = currentPlace();
+        if (t != lastType || pl != lastPlace)
         {
-            lastType = t;
-            const auto& in = slotInfo (t);
-            const char* labels[3] = { in.a.label, in.b.label, in.c.label };
+            lastType = t; lastPlace = pl;
             for (int k = 0; k < 3; ++k)
             {
-                knobs[(size_t) k]->setLabel (labels[k]);
-                knobs[(size_t) k]->valueText = [t, k] (float v) { return slotValueText (t, k, v); };
+                knobs[(size_t) k]->setLabel (slotKnobLabel (t, k, pl));
+                knobs[(size_t) k]->valueText = [t, k, pl] (float v) { return slotValueText (t, k, v, pl); };
                 knobs[(size_t) k]->setVisible (t != SlotOff);
             }
             layoutPicker();
@@ -695,10 +732,11 @@ private:
     }
 
     SaneProcessor& proc;
-    int slot = 2, lastType = -1;
+    int slot = 2, lastType = -1, lastPlace = -1;
     bool picker = false;
     juce::Rectangle<int> graph;
-    Button typeBtn, wholeBtn, picksBtn;
+    Button typeBtn, removeBtn;
+    std::vector<std::unique_ptr<Chips>> placeChips;
     std::array<std::unique_ptr<Knob>, 3> knobs;
     std::vector<std::unique_ptr<Button>> typeButtons;
 };

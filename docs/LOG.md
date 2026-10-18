@@ -403,3 +403,21 @@ synthesis, intuitive / practical / clean synth design.
 **Diagnosis (verified in code):** no loop-time control (loop = 1/pitch only); output tapped the raw delay line (dry burst
 audible); dry/wet mix INSIDE a loop interferes on every pass (thin tail); saturate/fold normalised to unity small-signal gain
 with a low loop level (flat); picker had no Off. Plan + modulation opinion: `docs/SANE_V02_PLAN.md`.
+
+## 2026-10-18 — session 3 — Sane v0.2.0 (rework step 1)
+**User:** modulation = Seed-style; agrees: engine fixes now, mockup 3 for exciter / EQ / modulation; "modulations should go on the
+bottom row above the keyboard". "Enjoy the task! ^^"
+**Done:** see STATUS (loop time, direct, in/after-loop slots, remove, spread, calibration, help, init, middle-click, text).
+**Found on the way (tests / probes, not by ear):**
+1. Long BPM loops died between repeats: the "voice is quiet" check fired during the silence → wait > 1.5 loop lengths.
+2. Calibration probe: loop-internal level was 0.05 (Partials) .. 0.6 (Membrane) → saturators did nothing. Now ~1.0 per core.
+3. Partials: injecting the raw burst x 434 before the slots crushed every saturator → each line's share of the hit is
+   band-passed first.
+4. Switching a slot's type kept the old knob values (filter resonance became saturator asymmetry → pumping DC) → per-type defaults.
+5. After-loop saturator then ran through the per-voice high-pass → spiky → after-loop slots are now last in the voice chain.
+6. Strike position changed LOUDNESS by 6–7 dB (pluck comb mapped string-style; weights not energy-normalised) and cancelled
+   velocity → RMS-normalised weights, burst energy independent of its length, drum-logic comb (Delay core only),
+   default velocity → position -35 %. Partials keeps ~5 dB "rim is bigger" (constant-Q resonators) — accepted as character.
+7. Soft-hit test measured the soft hit on top of the loud hit's tail, and used peak (misleading with many modes) → fresh
+   instance + energy over 300 ms.
+8. CPU: per-sample sin/cos in freq shift / ring mod / chorus → phasor + polynomial sine (small gain). Extreme patch ~83 %.

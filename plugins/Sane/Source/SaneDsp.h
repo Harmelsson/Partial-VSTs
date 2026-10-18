@@ -32,6 +32,31 @@ inline float fastTanh (float x) noexcept
     return x * (27.0f + x2) / (27.0f + 9.0f * x2);
 }
 
+/// sin(2*pi*x) for x in [0, 1): cheap polynomial, plenty for LFOs (error < 0.1 %).
+inline float fastSin2Pi (float x) noexcept
+{
+    x -= std::floor (x);
+    const float t = x < 0.5f ? x : x - 0.5f;          // half cycle 0..0.5
+    const float y = 16.0f * t * (0.5f - t);             // Bhaskara-like parabola, 0..1
+    const float r = y * (0.775f + 0.225f * y);          // refinement
+    return x < 0.5f ? r : -r;
+}
+
+/// A rotating phasor: e^(i*2*pi*inc*n) without per-sample sin/cos. The rotation is recomputed only when the
+/// increment changes (parameter / pitch changes), the magnitude is renormalised every 256 samples.
+struct Phasor
+{
+    float re = 1.0f, im = 0.0f, rr = 1.0f, ri = 0.0f, lastInc = -1e9f;
+    int n = 0;
+    void step (float inc) noexcept
+    {
+        if (std::abs (inc - lastInc) > 1e-12f) { lastInc = inc; rr = std::cos (6.2831853f * inc); ri = std::sin (6.2831853f * inc); }
+        const float a = re * rr - im * ri, b = re * ri + im * rr;
+        re = a; im = b;
+        if (++n >= 256) { n = 0; const float m = 1.0f / std::sqrt (re * re + im * im); re *= m; im *= m; }
+    }
+};
+
 /// The loop guard: transparent below ~1, never above +-kGuard. Every loop passes through it, so even a
 /// loop gain > 1 (self-oscillation, resonant filters, folders) can't grow without bound.
 inline constexpr float kGuard = 2.5f;
@@ -251,6 +276,7 @@ struct InsertState
     std::array<float, 8> hx1 {}, hx2 {}, hy1 {}, hy2 {};
     std::array<float, 8> hz1 {}, hz2 {}, hw1 {}, hw2 {};
     float hDelay = 0.0f, phase = 0.0f, lfo = 0.0f;
+    Phasor rot;   // freq shift / ring mod carrier
     // delay buffer (fine delay / chorus)
     float* buf = nullptr;
     int mask = 0, w = 0;
@@ -263,6 +289,7 @@ struct InsertState
         hx1.fill (0.0f); hx2.fill (0.0f); hy1.fill (0.0f); hy2.fill (0.0f);
         hz1.fill (0.0f); hz2.fill (0.0f); hw1.fill (0.0f); hw2.fill (0.0f);
         hDelay = 0.0f;
+        rot = Phasor();
         if (buf != nullptr) std::fill (buf, buf + mask + 1, 0.0f);
         w = 0;
     }
@@ -301,7 +328,7 @@ struct InsertState
                 buf[w] = x;
                 float d = c.followPeriods > 0.0f ? c.followPeriods * period : c.delaySamples;
                 lfo += c.lfoInc; if (lfo >= 1.0f) lfo -= 1.0f;
-                d += c.wobbleSamples * (0.5f + 0.5f * std::sin ((float) (2.0 * kPi) * lfo));
+                d += c.wobbleSamples * (0.5f + 0.5f * fastSin2Pi (lfo));
                 y = d < 1.0f ? x : readLinear (d);
                 w = (w + 1) & mask;
                 break;
@@ -342,9 +369,8 @@ struct InsertState
                     q = o2;
                 }
                 const float re = hDelay; hDelay = p;
-                phase += c.shiftInc * (1.0f + c.spreadAmt * spread); phase -= std::floor (phase);
-                const float ang = (float) (2.0 * kPi) * phase;
-                const float sh = re * std::cos (ang) - q * std::sin (ang);
+                rot.step (c.shiftInc * (1.0f + c.spreadAmt * spread));
+                const float sh = re * rot.re - q * rot.im;
                 y = x + c.mix * (sh - x);
                 break;
             }
@@ -353,7 +379,7 @@ struct InsertState
                 if (buf == nullptr) break;
                 buf[w] = x;
                 lfo += c.lfoInc * (1.0f + 0.6f * c.spreadAmt * spread); if (lfo >= 1.0f) lfo -= 1.0f;
-                const float d = 1.0f + c.wobbleSamples * (1.0f + std::sin ((float) (2.0 * kPi) * lfo));
+                const float d = 1.0f + c.wobbleSamples * (1.0f + fastSin2Pi (lfo));
                 const float wet = readLinear (d);
                 w = (w + 1) & mask;
                 y = x + c.mix * (wet - x);
@@ -370,9 +396,8 @@ struct InsertState
             }
             case 8: // ring mod
             {
-                phase += (c.ringFollow ? lineInc * c.ringRatio : c.ringFixedInc) * (1.0f + 0.1f * c.spreadAmt * spread);
-                phase -= std::floor (phase);
-                const float rm = x * std::cos ((float) (2.0 * kPi) * phase);
+                rot.step ((c.ringFollow ? lineInc * c.ringRatio : c.ringFixedInc) * (1.0f + 0.1f * c.spreadAmt * spread));
+                const float rm = x * rot.re;
                 y = x + c.mix * (rm - x);
                 break;
             }

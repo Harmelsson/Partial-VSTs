@@ -22,19 +22,24 @@ public:
 private:
     void timerCallback() override;
     void setUiScale (float s);
+    void initPatch();
+    void updateTimeKnob();
 
     SaneProcessor& proc;
     sane::look::LookAndFeel lnf;
 
     // header
-    sane::ui::Button kitBtn, tunedBtn, linkBtn, scaleDown, scaleUp;
+    sane::ui::Button initBtn, kitBtn, tunedBtn, linkBtn, scaleDown, scaleUp;
+    juce::TooltipWindow tooltips { this, 450 };
     // exciter
     sane::ui::Button noiseBtn, audioBtn;
     sane::ui::ExciterView exciter;
     std::vector<std::unique_ptr<sane::ui::Knob>> excKnobs, loopKnobs, modeKnobs;
     std::vector<std::unique_ptr<sane::ui::Bar>> excBars, strikeBars;
     // loop
-    sane::ui::Chips coreChips;
+    sane::ui::Chips coreChips, timeChips;
+    std::unique_ptr<sane::ui::Knob> timeKnob, keyTrackKnob;
+    int shownTimeMode = -1;
     sane::ui::LoopRing ring;
     // modes
     sane::ui::Chips tableChips, srcAChips, srcBChips;

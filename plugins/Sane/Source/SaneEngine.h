@@ -517,6 +517,7 @@ private:
                 eR -= 0.8f * del;
             }
 
+            const bool burstLive = v.burst.isActive();
             // read all lines (3rd-order Lagrange fractional delay)
             for (int l = 0; l < nLines; ++l)
             {
@@ -557,7 +558,7 @@ private:
                 // the hit enters HERE, before the in-loop slots and the loop's filter: the effects shape it from the very
                 // first pass, so the raw noise is never heard (only via DIRECT); the output is tapped after the filter.
                 float ex = (l % 2 == 0) ? eL : eR;
-                if (partials) // Partials: shape this line's share of the hit with its band-pass first, so the slots only ever
+                if (partials && (burstLive || std::abs (ln.exY1) + std::abs (ln.exY2) > 1e-9f)) // Partials: shape this line's share of the hit with its band-pass first, so the slots only ever
                 {             // see a mode-sized signal (not the raw burst x 400 makeup, which crushed every saturator)
                     const float b = ln.bpB0 * (ex - ln.exX2) - ln.bpA1 * ln.exY1 - ln.bpA2 * ln.exY2;
                     ln.exX2 = ln.exX1; ln.exX1 = ex; ln.exY2 = ln.exY1; ln.exY1 = b;

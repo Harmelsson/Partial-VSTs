@@ -3,6 +3,7 @@
 _Last updated: 2026-10-17 (session 3)_
 
 ## Sane v0.2.0 (step 1 of the rework) — waiting for the user's ears
+**Download:** Release `build-24` (CI green on Windows incl. all tests): https://github.com/Harmelsson/Partial-VSTs/releases/tag/build-24
 Plan + diagnosis: `docs/SANE_V02_PLAN.md`. User decisions 2026-10-18: Seed-style drag-and-drop modulation; mockup 3 for the
 exciter / EQ / modulation areas before building them; **modulation row goes on the bottom, above the keyboard**.
 **Done in v0.2.0:** LOOP TIME (Keys / Hz / ms / BPM + key track; Delay core up to 2.1 s = echo-like), DIRECT (dry hit) knob,

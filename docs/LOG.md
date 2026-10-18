@@ -424,3 +424,4 @@ bottom row above the keyboard". "Enjoy the task! ^^"
 - Mockup 3 published (same canvas, right board): new exciter (drawn A/H/D envelope, Lock/Random, 3-band tone), Dyn EQ as a slot +
   output EQ tab, modulation row above the keyboard (VEL, KEY, RANDOM, ENV 1-2, LFO 1-4, MOD WHEEL, PRESSURE; editor; link list),
   knobs show white modulation rings. Row heights: 392 / 246 / 122 + keys 46 (fits 880 px).
+- CI run #24 (main, Sane v0.2.0) green on Windows; Release `build-24` published (build step ~22 min).

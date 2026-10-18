@@ -236,6 +236,8 @@ struct SlotCoeffs
     // flip
     float flipChance = 0.0f;
     float mix = 1.0f;
+    float spreadAmt = 0.0f;   // in-loop freq shift / chorus / ring mod: how differently each line is detuned
+    bool inLoop = true;
 };
 
 /// Per-line state of one slot. Buffer memory comes from the engine's pool (no allocation on the audio thread).
@@ -276,7 +278,7 @@ struct InsertState
 
     /// One sample through the slot. `period` = this line's period in samples (for "follow pitch"),
     /// `lineInc` = this line's frequency as phase increment (cycles/sample), `lfoOffset` decorrelates lines.
-    float process (float x, const SlotCoeffs& c, float period, float lineInc) noexcept
+    float process (float x, const SlotCoeffs& c, float period, float lineInc, float spread) noexcept
     {
         float y = x;
         switch (c.type)
@@ -317,8 +319,10 @@ struct InsertState
                 y = v;
                 break;
             }
-            case 4: // saturate: small-signal gain ~1, loud parts compressed (brighter)
-                y = (fastTanh (c.drive * x + c.bias) - c.biasOut) / c.drive;
+            case 4: // saturate. In the loop: small-signal gain 1 (else the loop explodes), loud parts squashed — the loop
+                    // level is calibrated to ~1.0, so DRIVE really bites. After the loop: drive pushes the (quieter) output.
+                if (c.inLoop) y = (fastTanh (c.drive * x + c.bias) - c.biasOut) / c.drive;
+                else y = (fastTanh (c.drive * x * 3.0f + c.bias) - c.biasOut) / (3.0f * std::sqrt (c.drive));
                 y = x + c.mix * (y - x);
                 break;
             case 5: // freq shift: Hilbert pair (Niemitalo coefficients) + complex rotation
@@ -338,7 +342,7 @@ struct InsertState
                     q = o2;
                 }
                 const float re = hDelay; hDelay = p;
-                phase += c.shiftInc; phase -= std::floor (phase);
+                phase += c.shiftInc * (1.0f + c.spreadAmt * spread); phase -= std::floor (phase);
                 const float ang = (float) (2.0 * kPi) * phase;
                 const float sh = re * std::cos (ang) - q * std::sin (ang);
                 y = x + c.mix * (sh - x);
@@ -348,7 +352,7 @@ struct InsertState
             {
                 if (buf == nullptr) break;
                 buf[w] = x;
-                lfo += c.lfoInc; if (lfo >= 1.0f) lfo -= 1.0f;
+                lfo += c.lfoInc * (1.0f + 0.6f * c.spreadAmt * spread); if (lfo >= 1.0f) lfo -= 1.0f;
                 const float d = 1.0f + c.wobbleSamples * (1.0f + std::sin ((float) (2.0 * kPi) * lfo));
                 const float wet = readLinear (d);
                 w = (w + 1) & mask;
@@ -366,7 +370,7 @@ struct InsertState
             }
             case 8: // ring mod
             {
-                phase += c.ringFollow ? lineInc * c.ringRatio : c.ringFixedInc;
+                phase += (c.ringFollow ? lineInc * c.ringRatio : c.ringFixedInc) * (1.0f + 0.1f * c.spreadAmt * spread);
                 phase -= std::floor (phase);
                 const float rm = x * std::cos ((float) (2.0 * kPi) * phase);
                 y = x + c.mix * (rm - x);
@@ -385,10 +389,11 @@ struct InsertState
 };
 
 /// Fill the per-block coefficients of a slot from its knobs.
-inline SlotCoeffs makeSlotCoeffs (int type, float a, float b, float c, double sr) noexcept
+inline SlotCoeffs makeSlotCoeffs (int type, float a, float b, float c, double sr, bool inLoop = true) noexcept
 {
     SlotCoeffs k;
     k.type = type; k.a = a; k.b = b; k.c = c;
+    k.inLoop = inLoop;
     const double nyq = 0.5 * sr;
     switch (type)
     {
@@ -415,26 +420,28 @@ inline SlotCoeffs makeSlotCoeffs (int type, float a, float b, float c, double sr
             k.apStages = 1 + (int) std::lround (b * 11.0f);
             break;
         case 4:
-            k.drive = 1.0f + 19.0f * a * a;
+            k.drive = 1.0f + 39.0f * a * a;
             k.bias = (b - 0.5f) * 1.2f;
             k.biasOut = fastTanh (k.bias);
             k.mix = c;
             break;
         case 5:
         {
-            const double range = 1.0 + 49.0 * b * b;
+            const double range = 1.0 + 199.0 * b * b;
             k.shiftInc = (float) (((a - 0.5) * 2.0) * range / sr);
-            k.mix = c;
+            k.mix = inLoop ? 1.0f : c;        // in the loop: always fully wet, C = spread (see slotCIsSpread)
+            k.spreadAmt = inLoop ? c : 0.0f;
             break;
         }
         case 6:
             k.wobbleSamples = (float) (0.001 * a * a * sr);
             k.lfoInc = (float) (0.05 * std::pow (200.0, (double) b) / sr);
-            k.mix = c;
+            k.mix = inLoop ? 1.0f : c;
+            k.spreadAmt = inLoop ? c : 0.0f;
             break;
         case 7:
         {
-            k.drive = 1.0f + 9.0f * a;
+            k.drive = 1.0f + 19.0f * a;
             k.bias = (b - 0.5f) * 1.6f;
             const float t = k.bias * 0.25f + 0.25f;
             k.biasOut = -(4.0f * std::abs (t - std::floor (t + 0.5f)) - 1.0f);
@@ -445,7 +452,8 @@ inline SlotCoeffs makeSlotCoeffs (int type, float a, float b, float c, double sr
             k.ringRatio = 0.25f + 7.75f * a * a;
             k.ringFollow = b >= 0.5f;
             k.ringFixedInc = (float) (110.0 * k.ringRatio / sr);
-            k.mix = c;
+            k.mix = inLoop ? 1.0f : c;
+            k.spreadAmt = inLoop ? c : 0.0f;
             break;
         case 9:
             k.flipChance = a * 0.5f;

@@ -32,19 +32,30 @@ inline constexpr int kScopeBins = 400;              // UI scope: bins over kScop
 inline constexpr double kScopeSeconds = 1.2;
 
 inline int linesForCore (int core) { return core == CoreDelay ? 1 : (core == CorePartials ? 16 : 8); }
+inline constexpr double kMaxLoopSeconds = 2.1;     // longest loop (Delay core, ms / BPM modes)
+// Calibration (measured, SaneTests --probe): a full-velocity hit reaches ~1.0 INSIDE every core's loops, so in-loop
+// saturators / folders bite the same way in every core; the output makeup brings the cores back to similar loudness.
+inline constexpr std::array<double, 3> kInMakeup { 10.2, 434.0, 4.1 };   // Membrane, Partials, Delay
+inline constexpr float kStrikeRef = 0.5f;   // typical RMS weight before normalisation (keeps the calibration below)
+inline constexpr std::array<float, 3> kOutMakeup { 0.55f, 1.3f, 0.6f };
 
 /// Everything the engine needs from the parameters, read once per block.
 struct EngineParams
 {
     float exColor = 0.45f, exLength = 5.0f, exGrain = 0.15f, exLevelDb = 0.0f, exRandom = 0.35f, exVelRandom = 0.2f,
           exVelLength = -0.3f, exKeyColor = 0.4f, exSpread = 0.5f;
-    float stBase = 0.4f, stVel = -0.6f, stKey = 0.4f, stRandom = 0.06f;
+    float stBase = 0.4f, stVel = -0.35f, stKey = 0.4f, stRandom = 0.06f;
     int core = CoreMembrane;
     float feedback = 0.65f, damp = 0.4f, tension = 1.5f, coupling = 0.3f, width = 0.5f;
     int table = TabMembrane, srcA = SrcPhysical, srcB = SrcCalc;
     float morph = 0.0f, calcSeed = 2.0f, rolloff = 0.35f;
     float pitchAmt = 3.0f, pitchTime = 60.0f, lengthMs = kLengthOff;
     float tune = 0.0f, fine = 0.0f, bendRange = 2.0f, gainDb = -3.0f;
+    // v0.2
+    float exDirectDb = -30.0f;
+    int loopMode = LoopKeys;
+    float loopHz = 110.0f, loopMs = 10.0f, loopBeatSec = 0.25f, keyTrack = 0.0f;
+    std::array<int, kNumSlots> slotPlace {};
     std::array<int, kNumSlots> slotType {};
     std::array<float, kNumSlots> slotA {}, slotB {}, slotC {};
 };
@@ -82,10 +93,14 @@ public:
         // A line must hold one period of the lowest pitch (16 Hz) plus headroom for downward glides.
         lineSize = 1;
         while (lineSize < (int) (sr / 12.0) + 8) lineSize <<= 1;
+        // line 0 can be LONG (v0.2: loop time in ms / BPM up to ~2 s, Delay core = echo-like feedback)
+        longSize = 1;
+        while (longSize < (int) (kMaxLoopSeconds * sr) + 8) longSize <<= 1;
         insSize = 1;
         while (insSize < (int) (0.012 * sr) + 8) insSize <<= 1;
         linePool.assign ((size_t) (kMaxVoices * kMaxLines * lineSize), 0.0f);
-        insPool.assign ((size_t) (kMaxVoices * kMaxLines * kNumSlots * insSize), 0.0f);
+        longPool.assign ((size_t) (kMaxVoices * longSize), 0.0f);
+        insPool.assign ((size_t) (kMaxVoices * (kMaxLines + 2) * kNumSlots * insSize), 0.0f);
         excPool.assign ((size_t) (kMaxVoices * lineSize), 0.0f);
         for (int v = 0; v < kMaxVoices; ++v)
         {
@@ -94,15 +109,25 @@ public:
             for (int l = 0; l < kMaxLines; ++l)
             {
                 auto& ln = vc.lines[(size_t) l];
-                ln.buf = linePool.data() + (size_t) ((v * kMaxLines + l) * lineSize);
+                ln.buf = l == 0 ? longPool.data() + (size_t) (v * longSize) : linePool.data() + (size_t) ((v * kMaxLines + l) * lineSize);
+                ln.mask = (l == 0 ? longSize : lineSize) - 1;
+                ln.spread = 0.0f;
                 for (int s = 0; s < kNumSlots; ++s)
                 {
                     auto& is = ln.ins[(size_t) s];
-                    is.buf = insPool.data() + (size_t) (((v * kMaxLines + l) * kNumSlots + s) * insSize);
+                    is.buf = insPool.data() + (size_t) (((v * (kMaxLines + 2) + l) * kNumSlots + s) * insSize);
                     is.mask = insSize - 1;
                     is.rng = dsp::Rng ((uint32_t) (v * 7919 + l * 104729 + s * 13 + 1));
                 }
             }
+            for (int c = 0; c < 2; ++c)   // after-loop slots: one state per output channel
+                for (int s = 0; s < kNumSlots; ++s)
+                {
+                    auto& is = vc.post[(size_t) c][(size_t) s];
+                    is.buf = insPool.data() + (size_t) (((v * (kMaxLines + 2) + kMaxLines + c) * kNumSlots + s) * insSize);
+                    is.mask = insSize - 1;
+                    is.rng = dsp::Rng ((uint32_t) (v * 31 + c * 977 + s * 7 + 5));
+                }
             vc.reset (lineSize);
         }
         scopeVoice = -1;
@@ -165,18 +190,20 @@ public:
         const auto ratios = computeRatios (prm);
         // Per-block slot coefficients (shared by every line of every voice).
         std::array<dsp::SlotCoeffs, kNumSlots> sc;
-        int active[kNumSlots], nActive = 0;
+        int active[kNumSlots], nActive = 0, after[kNumSlots], nAfter = 0;
         for (int s = 0; s < kNumSlots; ++s)
         {
-            sc[(size_t) s] = dsp::makeSlotCoeffs (prm.slotType[(size_t) s], prm.slotA[(size_t) s], prm.slotB[(size_t) s], prm.slotC[(size_t) s], sr);
-            if (prm.slotType[(size_t) s] != SlotOff) active[nActive++] = s;
+            const bool inLoop = prm.slotPlace[(size_t) s] == PlaceLoop;
+            sc[(size_t) s] = dsp::makeSlotCoeffs (prm.slotType[(size_t) s], prm.slotA[(size_t) s], prm.slotB[(size_t) s], prm.slotC[(size_t) s], sr, inLoop);
+            if (prm.slotType[(size_t) s] == SlotOff) continue;
+            if (inLoop) active[nActive++] = s; else after[nAfter++] = s;
         }
         const float outGain = (float) std::pow (10.0, prm.gainDb / 20.0);
         for (int vi = 0; vi < kMaxVoices; ++vi)
         {
             auto& v = voices[(size_t) vi];
             if (! v.active) continue;
-            renderVoice (v, ratios, sc, active, nActive, outL, outR, numSamples, outGain, vi == scopeVoice);
+            renderVoice (v, ratios, sc, active, nActive, after, nAfter, outL, outR, numSamples, outGain, vi == scopeVoice);
         }
         report.activeVoices.store (activeVoices(), std::memory_order_relaxed);
     }
@@ -204,8 +231,11 @@ private:
         float lpCoef = 1.0f, lpState = 0.0f, lpComp = 1.0f;
         float hpR = 0.9995f, hpX1 = 0.0f, hpY1 = 0.0f;  // DC guard inside the loop
         float bpB0 = 0.0f, bpA1 = 0.0f, bpA2 = 0.0f, bpX1 = 0.0f, bpX2 = 0.0f, bpY1 = 0.0f, bpY2 = 0.0f;
+        float exX1 = 0.0f, exX2 = 0.0f, exY1 = 0.0f, exY2 = 0.0f;  // Partials: the hit's own band-pass (same coefficients)
         float inj = 0.0f, panL = 0.707f, panR = 0.707f;
         float inc = 0.0f;                    // line frequency as cycles/sample (ring mod "follow")
+        int mask = 0;                        // buffer size - 1 (line 0 has a long buffer)
+        float spread = 0.0f;                 // -1..+1 across the lines (slots with SPREAD detune each line differently)
         std::array<dsp::InsertState, kNumSlots> ins;
     };
 
@@ -224,6 +254,8 @@ private:
         int excW = 0;
         float combDelay = 0.0f;
         int ctrlLeft = 0;
+        float f0 = 100.0f;                    // current loop frequency (after-loop slots use it for "follow pitch")
+        std::array<std::array<dsp::InsertState, kNumSlots>, 2> post;
         // output high-pass (2nd-order Butterworth, half an octave+ below the lowest mode): removes sub-bass outside the loop
         float ob0 = 1.0f, ob1 = 0.0f, ob2 = 0.0f, oa1 = 0.0f, oa2 = 0.0f;
         std::array<float, 2> ox1 {}, ox2 {}, oy1 {}, oy2 {};
@@ -236,13 +268,14 @@ private:
             env = 0.0f; peak = 1e-6f; muteGain = 1.0f; gov = 1.0f; quietCtrl = 0; t = 0.0; ctrlLeft = 0;
             for (auto& ln : lines)
             {
-                if (ln.buf != nullptr) std::fill (ln.buf, ln.buf + lineSize, 0.0f);
-                ln.w = 0; ln.lpState = 0.0f; ln.hpX1 = ln.hpY1 = 0.0f; ln.bpX1 = ln.bpX2 = ln.bpY1 = ln.bpY2 = 0.0f; ln.Lstep = 0.0f; ln.gStep = 0.0f;
+                if (ln.buf != nullptr) std::fill (ln.buf, ln.buf + ln.mask + 1, 0.0f);
+                ln.w = 0; ln.lpState = 0.0f; ln.hpX1 = ln.hpY1 = 0.0f; ln.bpX1 = ln.bpX2 = ln.bpY1 = ln.bpY2 = 0.0f; ln.exX1 = ln.exX2 = ln.exY1 = ln.exY2 = 0.0f; ln.Lstep = 0.0f; ln.gStep = 0.0f;
                 for (auto& is : ln.ins) is.clear();
             }
             if (excBuf != nullptr) std::fill (excBuf, excBuf + lineSize, 0.0f);
             excW = 0;
             ox1.fill (0.0f); ox2.fill (0.0f); oy1.fill (0.0f); oy2.fill (0.0f);
+            for (auto& ch : post) for (auto& is : ch) is.clear();
         }
     };
 
@@ -272,8 +305,19 @@ private:
         float r = p.stBase + p.stVel * (velocity - 0.5f) + p.stKey * key + p.stRandom * rng.next();
         r = std::clamp (r, 0.0f, 0.96f);
         v.strikeR = r;
+        // strike position changes the TIMBRE (which modes get the energy), velocity the LOUDNESS: the weights are
+        // RMS-normalised over the core's lines, so a rim hit (many modes) isn't louder than a centre hit (few modes).
+        double sumSq = 0.0;
+        const int nl = linesForCore (p.core);
         for (int i = 0; i < kMaxLines; ++i)
+        {
             v.weights[(size_t) i] = (float) dsp::modes::strikeWeight (p.table, i, r);
+            // (Partials: include the band-pass capture factor 1/ratio that the injection applies, see control())
+            const double cap = p.core == CorePartials ? std::pow (std::max (0.25, computeRatios (p)[(size_t) i]), 2.0) : 1.0;
+            if (i < nl) sumSq += (double) v.weights[(size_t) i] * v.weights[(size_t) i] * std::pow (i + 1.0, -2.0 * p.rolloff) * cap;
+        }
+        const float wn = (float) (1.0 / std::sqrt (std::max (1e-9, sumSq / nl)) * kStrikeRef);
+        for (auto& w : v.weights) w *= wn;
 
         // ---- the burst: new noise on every note, varied by the randomness settings ----
         const float rnd = std::clamp (p.exRandom + p.exVelRandom * (velocity - 0.5f) * 2.0f, 0.0f, 1.0f);
@@ -281,9 +325,11 @@ private:
         b.seed = rng.bits() | 1u;
         b.lengthMs = p.exLength * std::pow (2.0f, p.exVelLength * (velocity - 0.5f) * 2.0f) * (1.0f + rnd * 0.8f * rng.next());
         b.lengthMs = std::clamp (b.lengthMs, 0.2f, 200.0f);
-        b.color = std::clamp (p.exColor + p.exKeyColor * key * 0.5f + 0.25f * (velocity - 0.6f) + rnd * 0.3f * rng.next(), 0.0f, 1.0f);
+        b.color = std::clamp (p.exColor + p.exKeyColor * key * 0.5f + rnd * 0.3f * rng.next(), 0.0f, 1.0f); // no hidden velocity link (v0.2)
         b.grain = std::clamp (p.exGrain * (1.0f + rnd * rng.next()), 0.0f, 1.0f);
         b.level = (float) std::pow (10.0, p.exLevelDb / 20.0) * (0.15f + 0.85f * velocity * velocity) * (1.0f + rnd * 0.25f * rng.next());
+        // burst LENGTH changes the character (stick .. brush), not the loudness: keep the burst's energy constant
+        b.level *= std::sqrt (5.0f / std::max (0.3f, b.lengthMs));
         b.spread = p.exSpread;
         v.burst.start (b, sr);
         // pluck-position comb on the exciter (Delay + Membrane cores): delay = r/2 of the fundamental's period
@@ -308,8 +354,21 @@ private:
         const double drawn = p.pitchAmt * std::exp (-v.t / std::max (0.002, (double) p.pitchTime * 0.001));
         const double e = std::clamp ((double) (v.env / std::max (1e-6f, v.peak)), 0.0, 1.0);
         const double tens = p.tension * v.vel * e * e;
-        const double semis = (v.note - 69) + p.tune + p.fine * 0.01 + bendSemis + drawn + tens;
-        const double f0 = std::clamp (440.0 * std::pow (2.0, semis / 12.0), 16.0, 0.45 * sr);
+        const double offset = p.tune + p.fine * 0.01 + bendSemis + drawn + tens;
+        // LOOP TIME: Keys = the played key sets the loop (pitched drum). Hz / ms / BPM = a fixed loop length (like a
+        // delay); KEY TRACK bends it with the keys around C4 (100 % = semitones).
+        double fBase;
+        switch (p.loopMode)
+        {
+            case LoopHz:  fBase = p.loopHz * std::pow (2.0, p.keyTrack * (v.note - 60) / 12.0); break;
+            case LoopMs:  fBase = 1000.0 / std::max (0.05f, p.loopMs) * std::pow (2.0, p.keyTrack * (v.note - 60) / 12.0); break;
+            case LoopBpm: fBase = 1.0 / std::max (0.001f, p.loopBeatSec) * std::pow (2.0, p.keyTrack * (v.note - 60) / 12.0); break;
+            default:      fBase = 440.0 * std::pow (2.0, (v.note - 69) / 12.0); break;
+        }
+        // Only the Delay core's single loop may be long (echo); Membrane / Partials stay pitched (>= 16 Hz).
+        const double fMin = p.core == CoreDelay ? 1.0 / (kMaxLoopSeconds - 0.05) : 16.0;
+        const double f0 = std::clamp (fBase * std::pow (2.0, offset / 12.0), fMin, 0.45 * sr);
+        v.f0 = (float) f0;
 
         // ---- decay ----
         double t60 = feedbackToT60 (p.feedback);
@@ -321,7 +380,9 @@ private:
         if (v.muting) v.muteGain *= 0.82f; // ~ -60 dB in ~35 control blocks (~25 ms at 48k)
 
         // comb on the exciter for Delay / Membrane: pluck at r/2 of the period
-        v.combDelay = (p.core == CorePartials) ? 0.0f : (float) std::clamp (v.strikeR * 0.5 * sr / f0, 0.0, (double) lineSize - 4.0);
+        // Delay core only (Membrane / Partials get the position from real mode shapes): a "pluck point" comb on the hit.
+        // Drum logic: centre = half the period (full fundamental, odd overtones), rim = a short delay (thin, many overtones).
+        v.combDelay = (p.core != CoreDelay) ? 0.0f : (float) std::clamp ((0.5 - 0.4 * v.strikeR) * sr / f0, 0.0, (double) lineSize - 4.0);
 
         {
             double minRatio = 1.0;
@@ -347,7 +408,8 @@ private:
             if (p.core != CorePartials)
             {
                 const double rel = 1.0 + std::pow (1.0 - p.damp, 2.0) * 40.0;
-                const double fc = std::min (0.45 * sr, f * rel);
+                // long (echo) loops: tie the damping to an absolute cutoff instead (else a 2 Hz loop would be muffled)
+                const double fc = std::min (0.45 * sr, f < 40.0 ? 300.0 + 18000.0 * std::pow (1.0 - p.damp, 2.0) : f * rel);
                 a = 1.0 - std::exp (-2.0 * dsp::kPi * fc / sr);
                 const double re = 1.0 - (1.0 - a) * std::cos (w), im = (1.0 - a) * std::sin (w);
                 const double mag = a / std::sqrt (re * re + im * im);
@@ -380,7 +442,7 @@ private:
                 ln.bpA2 = (float) ((1.0 - alpha) / a0);
             }
 
-            const double Ltarget = std::clamp (sr / f - lpPhaseDelay, 2.5, (double) lineSize - 6.0);
+            const double Ltarget = std::clamp (sr / f - lpPhaseDelay, 2.5, (double) ln.mask - 6.0);
             ln.Lstep = (float) ((Ltarget - ln.L) / n);
             if (v.jump) { ln.L = (float) Ltarget; ln.Lstep = 0.0f; } // first block of a fresh voice: jump
 
@@ -396,9 +458,13 @@ private:
             const double roll = std::pow ((double) (i + 1), -(double) p.rolloff);
             const double w8 = (p.core == CoreDelay) ? 1.0 : v.weights[(size_t) i] * roll;
             // makeup: a band-passed (Partials) or 8-way split (Membrane) burst carries much less energy per line
-            const double makeup = p.core == CorePartials ? 20.0 : (p.core == CoreMembrane ? 6.0 : 1.0);
-            ln.inj = ok ? (float) (makeup * w8 / std::sqrt ((double) nLines)) : 0.0f;
+            const double makeup = kInMakeup[(size_t) juce::jlimit (0, 2, p.core)];
+            // Partials: a constant-Q band-pass catches noise energy in proportion to its frequency; 1/sqrt(ratio) evens that
+            // out, so high modes aren't louder just because they are high (and rim hits aren't louder than centre hits).
+            const double capture = p.core == CorePartials ? 1.0 / std::sqrt (std::max (0.25, ratio)) : 1.0;
+            ln.inj = ok ? (float) (makeup * w8 * capture / std::sqrt ((double) nLines)) : 0.0f;
             ln.inc = (float) (f / sr);
+            ln.spread = nLines > 1 ? (float) (2.0 * i / (nLines - 1) - 1.0) : 0.0f;
 
             // stereo: lines alternate left / right, spread by WIDTH
             const double side = nLines == 1 ? 0.0 : ((i % 2 == 0) ? -1.0 : 1.0) * (0.35 + 0.65 * (double) (i + 1) / nLines);
@@ -411,7 +477,7 @@ private:
     }
 
     void renderVoice (Voice& v, const std::array<double, kMaxLines>& ratios, const std::array<dsp::SlotCoeffs, kNumSlots>& sc,
-                      const int* active, int nActive, float* outL, float* outR, int numSamples, float outGain, bool scope)
+                      const int* active, int nActive, const int* after, int nAfter, float* outL, float* outR, int numSamples, float outGain, bool scope)
     {
         const int nLines = linesForCore (prm.core);
         const bool partials = prm.core == CorePartials;
@@ -421,7 +487,8 @@ private:
         const float theta = (float) (nLines > 1 ? prm.coupling * (partials ? 0.15 : 1.0) * dsp::kPi * 0.25 : 0.0);
         const float rc = std::cos (theta), rs = std::sin (theta);
         // output level: lines add up, so normalise gently (N^0.25) — keeps the three cores at similar loudness
-        const float norm = outGain / std::sqrt (std::sqrt ((float) nLines));
+        const float norm = outGain / std::sqrt (std::sqrt ((float) nLines)) * kOutMakeup[(size_t) juce::jlimit (0, 2, prm.core)];
+        const float direct = prm.exDirectDb <= -59.9f ? 0.0f : (float) std::pow (10.0, prm.exDirectDb / 20.0) * 0.5f;
         const int mask = lineSize - 1;
         float y[kMaxLines];
 
@@ -458,8 +525,9 @@ private:
                 const float D = ln.L;
                 const int di = (int) D;
                 const float p = D - (float) di + 1.0f; // position relative to tap (di - 1)
-                const float x0 = ln.buf[(ln.w - (di - 1)) & mask], x1 = ln.buf[(ln.w - di) & mask];
-                const float x2 = ln.buf[(ln.w - (di + 1)) & mask], x3 = ln.buf[(ln.w - (di + 2)) & mask];
+                const int lm = ln.mask;
+                const float x0 = ln.buf[(ln.w - (di - 1)) & lm], x1 = ln.buf[(ln.w - di) & lm];
+                const float x2 = ln.buf[(ln.w - (di + 1)) & lm], x3 = ln.buf[(ln.w - (di + 2)) & lm];
                 const float pm1 = p - 1.0f, pm2 = p - 2.0f, pm3 = p - 3.0f;
                 const float out = -x0 * pm1 * pm2 * pm3 * (1.0f / 6.0f) + x1 * p * pm2 * pm3 * 0.5f
                                   - x2 * p * pm1 * pm3 * 0.5f + x3 * p * pm1 * pm2 * (1.0f / 6.0f);
@@ -486,10 +554,19 @@ private:
             for (int l = 0; l < nLines; ++l)
             {
                 auto& ln = v.lines[(size_t) l];
-                float s = u[l];
+                // the hit enters HERE, before the in-loop slots and the loop's filter: the effects shape it from the very
+                // first pass, so the raw noise is never heard (only via DIRECT); the output is tapped after the filter.
+                float ex = (l % 2 == 0) ? eL : eR;
+                if (partials) // Partials: shape this line's share of the hit with its band-pass first, so the slots only ever
+                {             // see a mode-sized signal (not the raw burst x 400 makeup, which crushed every saturator)
+                    const float b = ln.bpB0 * (ex - ln.exX2) - ln.bpA1 * ln.exY1 - ln.bpA2 * ln.exY2;
+                    ln.exX2 = ln.exX1; ln.exX1 = ex; ln.exY2 = ln.exY1; ln.exY1 = b;
+                    ex = b;
+                }
+                float s = u[l] + ex * ln.inj;
                 const float period = ln.L;
                 for (int k = 0; k < nActive; ++k)
-                    s = ln.ins[(size_t) active[k]].process (s, sc[(size_t) active[k]], period, ln.inc);
+                    s = ln.ins[(size_t) active[k]].process (s, sc[(size_t) active[k]], period, ln.inc, ln.spread);
                 {
                     const float hp = s - ln.hpX1 + ln.hpR * ln.hpY1;
                     ln.hpX1 = s; ln.hpY1 = hp;
@@ -506,15 +583,17 @@ private:
                     ln.lpState += ln.lpCoef * (s - ln.lpState);
                     s = ln.lpState * ln.lpComp;
                 }
+                const float tap = s;
                 ln.g += ln.gStep;
                 s = dsp::guard (s * ln.g);
-                const float e = (l % 2 == 0) ? eL : eR;
-                ln.buf[ln.w] = s + e * ln.inj;
-                ln.w = (ln.w + 1) & mask;
-                oL += y[l] * ln.panL;
-                oR += y[l] * ln.panR;
+                ln.buf[ln.w] = s;
+                dbgLinePeak = std::max (dbgLinePeak, std::abs (s));
+                ln.w = (ln.w + 1) & ln.mask;
+                oL += tap * ln.panL;
+                oR += tap * ln.panR;
             }
             oL *= norm; oR *= norm;
+            // per-voice output high-pass on the LOOP signal (removes the phantom sub mode; outside the loop)
             {
                 auto hp = [&v] (float x, int c) {
                     const float o = v.ob0 * x + v.ob1 * v.ox1[(size_t) c] + v.ob2 * v.ox2[(size_t) c] - v.oa1 * v.oy1[(size_t) c] - v.oa2 * v.oy2[(size_t) c];
@@ -522,6 +601,20 @@ private:
                     return o;
                 };
                 oL = hp (oL, 0); oR = hp (oR, 1);
+            }
+            // DIRECT: the dry hit (stick attack) straight to the output, bypassing the loop
+            oL += eL * direct; oR += eR * direct;
+            // AFTER-LOOP slots: once, on this voice's output (normal effects, with a real dry/wet mix). Last in the chain,
+            // so nothing after them reshapes what they did.
+            if (nAfter > 0)
+            {
+                const float period = (float) (sr / std::max (1.0f, v.f0)), inc = v.f0 / (float) sr;
+                for (int k = 0; k < nAfter; ++k)
+                {
+                    const auto& c = sc[(size_t) after[k]];
+                    oL = v.post[0][(size_t) after[k]].process (oL, c, period, inc, -0.5f);
+                    oR = v.post[1][(size_t) after[k]].process (oR, c, period, inc, 0.5f);
+                }
             }
             outL[i] += oL;
             outR[i] += oR;
@@ -551,7 +644,9 @@ private:
                 else if (v.env < 0.6f) v.gov = std::min (1.0f, v.gov + 0.001f);
                 const bool quiet = v.env < 1e-5f && ! v.burst.isActive();
                 v.quietCtrl = quiet ? v.quietCtrl + 1 : 0;
-                if (v.quietCtrl > (int) (0.05 * sr / kCtrl) || (v.muting && v.muteGain < 1e-5f))
+                // "quiet" must last longer than one loop pass: a long (echo) loop is silent between its repeats
+                const int needQuiet = (int) ((0.05 * sr + 1.5 * v.lines[0].L) / kCtrl);
+                if (v.quietCtrl > needQuiet || (v.muting && v.muteGain < 1e-5f))
                 {
                     v.active = false;
                     return;
@@ -562,7 +657,8 @@ private:
 
     double sr = 48000.0;
     int lineSize = 4096, insSize = 1024;
-    std::vector<float> linePool, insPool, excPool;
+    std::vector<float> linePool, longPool, insPool, excPool;
+    int longSize = 1 << 17;
     std::array<Voice, kMaxVoices> voices;
     EngineParams prm;
     dsp::Rng rng { 0xC0FFEEu };
@@ -570,5 +666,7 @@ private:
     float envAtt = 0.2f, envRel = 0.9995f;
     int scopeVoice = -1;
     long scopeN = 0;
+public:
+    float dbgLinePeak = 0.0f; // tests: loudest loop-internal sample (calibration of the saturators)
 };
 } // namespace sane

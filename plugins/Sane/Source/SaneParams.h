@@ -15,7 +15,7 @@
 
 namespace sane
 {
-inline constexpr const char* kVersion = "0.1.0";
+inline constexpr const char* kVersion = "0.2.0";
 
 inline constexpr int kNumSlots = 7;   // insert slots on the loop ring
 
@@ -31,6 +31,7 @@ namespace ids
     inline constexpr const char* exVelLength = "exVelLength"; // velocity -> longer/shorter burst (-1..1)
     inline constexpr const char* exKeyColor = "exKeyColor";   // key -> brighter/darker (-1..1)
     inline constexpr const char* exSpread = "exSpread";       // stereo: different noise per side (0..1)
+    inline constexpr const char* exDirect = "exDirect";       // v0.2: the dry hit straight to the output (dB, -60 = off)
     // strike
     inline constexpr const char* stBase = "stBase";     // 0 = centre .. 0.96 = rim
     inline constexpr const char* stVel = "stVel";       // velocity -> position (-1..1; negative = loud hits go to the centre)
@@ -43,6 +44,13 @@ namespace ids
     inline constexpr const char* tension = "tension";   // energy -> pitch (semitones at a full hit)
     inline constexpr const char* coupling = "coupling"; // how strongly the loops feed each other
     inline constexpr const char* width = "width";       // stereo width of the loops
+    // v0.2: the loop's TIME (= its length). Keys: the played key sets it (pitched drum). Hz / ms / BPM: a fixed loop
+    // like a classic delay; KEY TRACK then bends it with the keys (100 % = keys play semitones again).
+    inline constexpr const char* loopMode = "loopMode"; // Keys / Hz / ms / BPM
+    inline constexpr const char* loopHz = "loopHz";
+    inline constexpr const char* loopMs = "loopMs";
+    inline constexpr const char* loopBeat = "loopBeat"; // tempo division (see beatNames)
+    inline constexpr const char* keyTrack = "keyTrack";
     // modes
     inline constexpr const char* table = "table";       // physical table: Membrane / Timpani / Tabla / Bar / Plate
     inline constexpr const char* srcA = "srcA";         // endpoint A source: Physical / Calc / File / Linked
@@ -61,11 +69,41 @@ namespace ids
     inline constexpr const char* gain = "gain";           // output dB
 
     /// Insert slot parameter: slot(3, "type") -> "s3type". Slots 1..kNumSlots.
-    /// Each slot has a type and three generic knobs a/b/c whose meaning depends on the type.
+    /// Each slot has a type, three generic knobs a/b/c whose meaning depends on the type, and (v0.2) "place":
+    /// In loop (runs on every pass) / After loop (runs once on the voice's output).
     inline juce::String slot (int s, const char* name) { return "s" + juce::String (s) + name; }
 } // namespace ids
 
 enum Core { CoreMembrane = 0, CorePartials, CoreDelay };
+
+enum LoopMode { LoopKeys = 0, LoopHz, LoopMs, LoopBpm };
+inline const juce::StringArray& loopModeNames() { static const juce::StringArray a { "Keys", "Hz", "ms", "BPM" }; return a; }
+
+enum Place { PlaceLoop = 0, PlaceAfter };
+inline const juce::StringArray& placeNames() { static const juce::StringArray a { "In loop", "After loop" }; return a; }
+
+/// Tempo divisions: 8 lengths x (straight / triplet "T" / dotted "."). Index = base * 3 + flavour.
+inline constexpr int kBeatBases = 8;
+inline const juce::StringArray& beatNames()
+{
+    static const juce::StringArray a = [] {
+        juce::StringArray r;
+        const char* base[kBeatBases] = { "1/64", "1/32", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars" };
+        for (auto* b : base) { r.add (b); r.add (juce::String (b) + " T"); r.add (juce::String (b) + " ."); }
+        return r;
+    }();
+    return a;
+}
+/// Length of a beat division in seconds at `bpm` (4/4: a bar = 4 quarter notes).
+inline double beatSeconds (int index, double bpm)
+{
+    const int base = juce::jlimit (0, kBeatBases - 1, index / 3), flavour = index % 3;
+    const double wholeNotes = std::pow (2.0, base - 6);   // 1/64 .. 2 bars
+    double s = wholeNotes * 4.0 * 60.0 / std::max (20.0, bpm);
+    if (flavour == 1) s *= 2.0 / 3.0;
+    if (flavour == 2) s *= 1.5;
+    return s;
+}
 inline const juce::StringArray& coreNames() { static const juce::StringArray a { "Membrane", "Partials", "Delay" }; return a; }
 
 enum Table { TabMembrane = 0, TabTimpani, TabTabla, TabBar, TabPlate };
@@ -102,8 +140,42 @@ inline const SlotInfo& slotInfo (int type)
     return info[juce::jlimit (0, (int) std::size (info) - 1, type)];
 }
 
+/// Inside the loop a dry/wet MIX of a time-varying effect (freq shift, chorus, ring mod) interferes with itself on every
+/// pass and thins the tail out (user report on v0.1). So in the loop those effects are always fully wet and knob C
+/// becomes SPREAD (each loop line gets a slightly different setting); after the loop C is a normal mix.
+inline bool slotCIsSpread (int type, int place) { return place == PlaceLoop && (type == SlotFreqShift || type == SlotChorus || type == SlotRingMod); }
+inline const char* slotKnobLabel (int type, int knob, int place)
+{
+    if (knob == 2 && slotCIsSpread (type, place)) return "spread";
+    const auto& in = slotInfo (type);
+    return knob == 0 ? in.a.label : (knob == 1 ? in.b.label : in.c.label);
+}
+
 /// Display text for a slot knob value (0..1) of the given type and knob (0 = a, 1 = b, 2 = c).
-juce::String slotValueText (int type, int knob, float v);
+juce::String slotValueText (int type, int knob, float v, int place = PlaceLoop);
+
+/// Good starting knob values (a, b, c) for a slot type: applied when the user switches a slot's type, so knobs
+/// don't carry over a meaning from the previous effect (e.g. a filter's resonance becoming a saturator's asymmetry).
+struct SlotDefaults { float a, b, c; };
+inline SlotDefaults slotDefaults (int type)
+{
+    switch (type)
+    {
+        case SlotFilter:    return { 0.85f, 0.15f, 0.0f };
+        case SlotFineDelay: return { 0.3f, 0.0f, 0.0f };
+        case SlotDisperse:  return { 0.35f, 0.35f, 0.75f };
+        case SlotSaturate:  return { 0.35f, 0.5f, 1.0f };
+        case SlotFreqShift: return { 0.6f, 0.15f, 0.3f };
+        case SlotChorus:    return { 0.4f, 0.3f, 0.5f };
+        case SlotFold:      return { 0.25f, 0.5f, 0.6f };
+        case SlotRingMod:   return { 0.4f, 1.0f, 0.3f };
+        case SlotFlip:      return { 0.3f, 0.5f, 1.0f };
+        default:            return { 0.5f, 0.5f, 1.0f };
+    }
+}
+
+/// One-line hover help for a parameter ID (empty if none).
+juce::String helpText (const juce::String& paramId);
 
 juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 

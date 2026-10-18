@@ -36,12 +36,16 @@ EngineParams SaneProcessor::readParams() const
     p.morph = v (ids::morph); p.calcSeed = v (ids::calcSeed); p.rolloff = v (ids::rolloff);
     p.pitchAmt = v (ids::pitchAmt); p.pitchTime = v (ids::pitchTime); p.lengthMs = v (ids::length);
     p.tune = v (ids::tune); p.fine = v (ids::fine); p.bendRange = v (ids::bendRange); p.gainDb = v (ids::gain);
+    p.exDirectDb = v (ids::exDirect);
+    p.loopMode = (int) v (ids::loopMode); p.loopHz = v (ids::loopHz); p.loopMs = v (ids::loopMs); p.keyTrack = v (ids::keyTrack);
+    p.loopBeatSec = (float) beatSeconds ((int) v (ids::loopBeat), hostBpm.load());
     for (int s = 0; s < kNumSlots; ++s)
     {
         p.slotType[(size_t) s] = (int) value (ids::slot (s + 1, "type"));
         p.slotA[(size_t) s] = value (ids::slot (s + 1, "a"));
         p.slotB[(size_t) s] = value (ids::slot (s + 1, "b"));
         p.slotC[(size_t) s] = value (ids::slot (s + 1, "c"));
+        p.slotPlace[(size_t) s] = (int) value (ids::slot (s + 1, "place"));
     }
     return p;
 }
@@ -52,6 +56,9 @@ void SaneProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     const int n = buffer.getNumSamples();
     buffer.clear();
     uiKeys.processNextMidiBuffer (midi, 0, n, true);
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            if (auto bpm = pos->getBpm()) hostBpm.store (*bpm);
 
     const auto p = readParams();
     engine.setParams (p);

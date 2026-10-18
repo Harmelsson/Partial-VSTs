@@ -46,6 +46,8 @@ public:
     juce::MidiKeyboardState uiKeys;
 
     int safetyFaults() const { return safety.faultCount(); }
+    /// Host tempo (BPM mode of the loop time). 120 until the host tells us.
+    std::atomic<double> hostBpm { 120.0 };
 
 private:
     pvst::SafetyStage safety;

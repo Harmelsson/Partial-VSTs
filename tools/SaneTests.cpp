@@ -243,10 +243,11 @@ void testLevels()
         for (auto s : x) pk = std::max (pk, std::abs (s));
         const double db = 20.0 * std::log10 (pk + 1e-12);
         check (db > -30.0 && db < -0.5, "default patch, " + coreNames()[core] + " core, full velocity: sensible level", juce::String (db, 1) + " dBFS");
-        auto y = r.render (1.0, 48, 0.25f);
-        float pk2 = 0.0f;
-        for (auto s : y) pk2 = std::max (pk2, std::abs (s));
-        check (pk2 < pk * 0.7f, "  soft hit is clearly quieter", juce::String (20.0 * std::log10 (pk2 / pk + 1e-12), 1) + " dB");
+        Rig r2; r2.set (ids::core, (float) core); // fresh instance: no tail of the loud hit
+        auto y = r2.render (1.0, 48, 0.25f);
+        // loudness = energy over the first 300 ms (a peak reading is misleading when soft rim hits ring more modes)
+        const double eLoud = rmsDb (x, 0, (size_t) (0.3 * kSr)), eSoft = rmsDb (y, 0, (size_t) (0.3 * kSr));
+        check (eSoft < eLoud - 3.0, "  soft hit is clearly quieter (energy, first 300 ms)", juce::String (eSoft - eLoud, 1) + " dB");
     }
 }
 
@@ -331,6 +332,98 @@ void testHit()
     }
 }
 
+
+double bandEnergyDb (const std::vector<float>& x, size_t from, size_t len, double fLo, double fHi)
+{
+    double e = 0.0;
+    for (double f = fLo; f <= fHi; f *= 1.06) { const double a = toneAmp (x.data() + from, len, f); e += a * a; }
+    return 10.0 * std::log10 (e + 1e-30);
+}
+
+void testV02()
+{
+    std::cout << "v0.2: loop time, direct, placement, calibration" << std::endl;
+    {
+        Rig r; r.plain (CoreDelay); r.set (ids::feedback, 0.85f); r.set (ids::loopMode, (float) LoopHz); r.set (ids::loopHz, 150.0f); r.set (ids::keyTrack, 0.0f);
+        auto a = r.render (1.0, 48, 0.8f);
+        Rig r2; r2.plain (CoreDelay); r2.set (ids::feedback, 0.85f); r2.set (ids::loopMode, (float) LoopHz); r2.set (ids::loopHz, 150.0f); r2.set (ids::keyTrack, 0.0f);
+        auto b = r2.render (1.0, 64, 0.8f);
+        const double fa = peakNear (a, 14400, 19200, 150.0), fb = peakNear (b, 14400, 19200, 150.0);
+        check (std::abs (cents (fa, 150.0)) < 4.0 && std::abs (cents (fb, 150.0)) < 4.0, "loop time 150 Hz, key track 0: every key rings 150 Hz",
+               juce::String (fa, 2) + " / " + juce::String (fb, 2) + " Hz");
+        Rig r3; r3.plain (CoreDelay); r3.set (ids::feedback, 0.85f); r3.set (ids::loopMode, (float) LoopHz); r3.set (ids::loopHz, 150.0f); r3.set (ids::keyTrack, 1.0f);
+        auto c = r3.render (1.0, 72, 0.8f);
+        const double fc = peakNear (c, 14400, 19200, 300.0);
+        check (std::abs (cents (fc, 300.0)) < 4.0, "key track 100 %: an octave above C4 rings 300 Hz", juce::String (fc, 2) + " Hz");
+    }
+    {
+        Rig r; r.plain (CoreDelay); r.set (ids::feedback, 0.85f); r.set (ids::loopMode, (float) LoopMs); r.set (ids::loopMs, 5.0f);
+        auto a = r.render (1.0, 60, 0.8f);
+        const double f = peakNear (a, 14400, 19200, 200.0);
+        check (std::abs (cents (f, 200.0)) < 4.0, "loop time 5 ms rings at 200 Hz", juce::String (f, 2) + " Hz");
+    }
+    {
+        Rig r; r.plain (CoreDelay); r.set (ids::feedback, 0.9f); r.set (ids::damp, 0.0f); r.set (ids::loopMode, (float) LoopBpm);
+        r.set (ids::loopBeat, 4.0f * 3.0f); // 1/4 at 120 BPM = 0.5 s
+        r.set (ids::exDirect, -60.0f);
+        auto a = r.render (1.4, 60, 1.0f);
+        const double gap = rmsDb (a, (size_t) (0.2 * kSr), (size_t) (0.25 * kSr)), echo = rmsDb (a, (size_t) (0.49 * kSr), (size_t) (0.06 * kSr));
+        check (echo - gap > 20.0, "BPM mode, Delay core, 1/4 at 120 BPM: the hit comes back after 0.5 s (echo-like loop)",
+               "gap " + juce::String (gap, 1) + " dB, echo " + juce::String (echo, 1) + " dB");
+    }
+    {
+        // in-loop filter shapes the hit from the first pass; with DIRECT off the raw noise is never heard
+        Rig a; a.plain (CoreDelay); a.set (ids::exDirect, -60.0f);
+        auto open = a.render (0.05, 60, 1.0f);
+        Rig b; b.plain (CoreDelay); b.set (ids::exDirect, -60.0f); b.set (ids::slot (1, "type"), (float) SlotFilter); b.set (ids::slot (1, "a"), 0.25f); b.set (ids::slot (1, "c"), 0.0f);
+        auto dark = b.render (0.05, 60, 1.0f);
+        const double hiOpen = bandEnergyDb (open, 0, 960, 4000.0, 12000.0), hiDark = bandEnergyDb (dark, 0, 960, 4000.0, 12000.0);
+        check (hiOpen - hiDark > 20.0, "the in-loop filter darkens the hit itself (first 20 ms) — no raw noise passes", juce::String (hiOpen - hiDark, 1) + " dB less highs");
+        Rig c; c.plain (CoreDelay); c.set (ids::exDirect, 0.0f); c.set (ids::slot (1, "type"), (float) SlotFilter); c.set (ids::slot (1, "a"), 0.25f); c.set (ids::slot (1, "c"), 0.0f);
+        auto withDirect = c.render (0.05, 60, 1.0f);
+        check (bandEnergyDb (withDirect, 0, 960, 4000.0, 12000.0) - hiDark > 20.0, "  DIRECT brings the dry hit back on purpose");
+    }
+    {
+        // freq shift in the loop: the tail no longer thins out between 0 and 100 % (C = spread, always fully wet)
+        double tails[3];
+        int k = 0;
+        for (float cval : { 0.0f, 0.5f, 1.0f })
+        {
+            Rig r; r.plain (CoreMembrane); r.set (ids::feedback, 0.8f);
+            r.set (ids::slot (1, "type"), (float) SlotFreqShift); r.set (ids::slot (1, "a"), 0.55f); r.set (ids::slot (1, "b"), 0.2f); r.set (ids::slot (1, "c"), cval);
+            auto x = r.render (1.0, 48, 0.9f);
+            tails[k++] = rmsDb (x, (size_t) (0.6 * kSr), (size_t) (0.2 * kSr));
+        }
+        const double spread = std::max ({ tails[0], tails[1], tails[2] }) - std::min ({ tails[0], tails[1], tails[2] });
+        check (spread < 6.0, "freq shift in the loop: tail level about the same at C = 0 / 50 / 100 % (no thin tail)",
+               juce::String (tails[0], 1) + " / " + juce::String (tails[1], 1) + " / " + juce::String (tails[2], 1) + " dB");
+    }
+    {
+        // calibration: an in-loop saturator at full drive clearly changes the ring (it used to do almost nothing)
+        Rig a; a.plain (CoreMembrane); auto clean = a.render (0.6, 48, 1.0f);
+        Rig b; b.plain (CoreMembrane); b.set (ids::slot (1, "type"), (float) SlotSaturate); b.set (ids::slot (1, "a"), 1.0f); b.set (ids::slot (1, "b"), 0.5f); b.set (ids::slot (1, "c"), 1.0f);
+        auto hot = b.render (0.6, 48, 1.0f);
+        double diff = 0.0, ref = 0.0;
+        for (size_t i = 0; i < clean.size(); ++i) { diff += (hot[i] - clean[i]) * (hot[i] - clean[i]); ref += clean[i] * clean[i]; }
+        const double rel = 10.0 * std::log10 (diff / (ref + 1e-30) + 1e-30);
+        check (rel > -6.0, "in-loop Saturate at full drive changes the sound a lot (calibrated loop level)", juce::String (rel, 1) + " dB difference");
+    }
+    {
+        // after-loop saturator adds overtones once (classic distortion)
+        Rig a; a.plain (CoreDelay); a.set (ids::damp, 0.9f); a.set (ids::gain, 0.0f); auto clean = a.render (0.5, 48, 1.0f);
+        Rig b; b.plain (CoreDelay); b.set (ids::damp, 0.9f); b.set (ids::gain, 0.0f); b.set (ids::slot (1, "type"), (float) SlotSaturate); b.set (ids::slot (1, "place"), (float) PlaceAfter);
+        b.set (ids::slot (1, "a"), 1.0f); b.set (ids::slot (1, "b"), 0.5f); b.set (ids::slot (1, "c"), 1.0f);
+        auto hot = b.render (0.5, 48, 1.0f);
+        auto crest = [] (const std::vector<float>& x, size_t from, size_t len) {
+            double pk = 0.0, e = 0.0;
+            for (size_t i = from; i < from + len; ++i) { pk = std::max (pk, (double) std::abs (x[i])); e += (double) x[i] * x[i]; }
+            return 20.0 * std::log10 (pk / std::sqrt (e / (double) len + 1e-30) + 1e-30);
+        };
+        const double c0 = crest (clean, 1440, 1200), c1 = crest (hot, 1440, 1200);
+        check (c0 - c1 > 1.5, "Saturate AFTER the loop flattens the waveform's peaks (classic distortion)", "crest " + juce::String (c0, 1) + " -> " + juce::String (c1, 1) + " dB");
+    }
+}
+
 void testState()
 {
     std::cout << "state" << std::endl;
@@ -403,7 +496,34 @@ int main (int argc, char** argv)
     for (int i = 1; i < argc; ++i)
         if (juce::String (argv[i]) == "--probe")
         {
-            for (int variant = 0; variant < 6; ++variant)
+            for (int core = 0; core < 3; ++core)
+                for (float base : { 0.05f, 0.7f })
+                    for (float vel : { 0.25f, 1.0f })
+                    {
+                        Rig r; r.set (ids::core, (float) core); for (int s = 1; s <= kNumSlots; ++s) r.set (ids::slot (s, "type"), 0.0f);
+                        r.set (ids::stVel, 0.0f); r.set (ids::stKey, 0.0f); r.set (ids::stRandom, 0.0f); r.set (ids::stBase, base);
+                        r.set (ids::exRandom, 0.0f); r.set (ids::exVelRandom, 0.0f); r.set (ids::exVelLength, 0.0f);
+                        auto x = r.render (0.5, 48, vel);
+                        std::cout << coreNames()[core] << " pos " << base << " vel " << vel << ": energy " << rmsDb (x, 0, 14400) << " dB" << std::endl;
+                    }
+            for (int slotsOn = 0; slotsOn < 0; ++slotsOn)
+                for (float vel : { 0.25f, 1.0f })
+                {
+                    Rig r; r.set (ids::core, (float) CorePartials);
+                    if (! slotsOn) for (int s = 1; s <= kNumSlots; ++s) r.set (ids::slot (s, "type"), 0.0f);
+                    auto x = r.render (1.0, 48, vel);
+                    float pk = 0; size_t at = 0; for (size_t j = 0; j < x.size(); ++j) if (std::abs (x[j]) > pk) { pk = std::abs (x[j]); at = j; }
+                    std::cout << "partials slots " << slotsOn << " vel " << vel << ": peak " << 20 * std::log10 (pk) << " dB at " << at / kSr * 1000 << " ms, strike " << r.proc->engine.report.strikeR.load() << std::endl;
+                }
+            for (int core = 0; core < 3; ++core)
+                for (float vel : { 0.3f, 1.0f })
+                {
+                    Rig r; r.set (ids::core, (float) core); for (int s = 1; s <= kNumSlots; ++s) r.set (ids::slot (s, "type"), 0.0f);
+                    r.proc->engine.dbgLinePeak = 0.0f;
+                    r.render (0.5, 48, vel);
+                    std::cout << coreNames()[core] << " vel " << vel << ": loop-internal peak " << r.proc->engine.dbgLinePeak << std::endl;
+                }
+            for (int variant = 0; variant < 0; ++variant)
             {
                 Rig r; r.set (ids::core, (float) CoreDelay);
                 if (variant >= 1 && variant <= 3) r.set (ids::slot (variant, "type"), 0.0f);
@@ -423,6 +543,7 @@ int main (int argc, char** argv)
     testLevels();
     testDynamic();
     testHit();
+    testV02();
     testState();
     for (int i = 1; i + 1 < argc; ++i)
         if (juce::String (argv[i]) == "--snapshot")

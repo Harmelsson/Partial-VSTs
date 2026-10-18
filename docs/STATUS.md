@@ -2,7 +2,9 @@
 
 _Last updated: 2026-10-17 (session 3)_
 
-## Sane v0.1.0 — first playable build (feedback drums) — waiting for the user's ears
+## Sane v0.1.0 — user tested ("good direction, needs serious rework") → v0.2 PLAN waiting for OK
+**Next:** user answers the questions in `docs/SANE_V02_PLAN.md` (modulation approach, mockup 3 or build) → build v0.2 in the order of section 4.
+
 Design: `docs/DRUM_RESEARCH.md`, mockup `docs/mockups/sane/` (https://claude.ai/artifact/MbhbEy59oop9ECwuRGzZau).
 Code: `plugins/Sane/` (README there). Tests: `tools/SaneTests.cpp` — all pass (pitch within 0.1 c in every core,
 safety at every extreme incl. self-oscillation, click-free morph, levels, tension/pitch drop/length, state).

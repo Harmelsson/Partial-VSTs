@@ -388,3 +388,18 @@ noise, strike vel/key, drawn pitch drop + energy tension, length, governor) + de
 Decisions: v0.1 leaves out kit drawer, link groups (rule ★ leader wins recorded), Seed scale keys, Pick/Dyn EQ/Air slots.
 - 12:00 check-in: CI run #21 (main, Sane v0.1.0) green on Windows incl. SaneTests + SeedTests; Release `build-21` published.
   Build step took 26 min (was ~9 with Seed alone): two plugins with LTO, and a parallel branch run sharing the runner pool.
+
+## 2026-10-18 — session 3 — user tested Sane v0.1.0 (build 21) → v0.2 plan
+**User (verbatim-ish):** unsure how the feedback loop works; can't find basic settings of the main delay ("a fine tuneable
+delay, both Hz and BPM"); unsure where each setting changes the sound → short description on hover. Noise is always random:
+wants to choose constant vs random noise, an envelope for it and a 3-band filter on the noise before the loop. An INIT stage
+(nothing randomised / velocity / keytrack) and middle click = back to base value. Filter may stay, but wants the dynamic
+5-band EQ from the mockup. FX settings should connect to keytrack / velocity / random — "maybe an LFO modulator mechanism
+like Seed? Don't build yet, just give opinions." Visually hard to read → maybe a temporary "skin maker" (own colours and
+contrasts). Can't remove FX from the chain. Freq shift "works great on 100 % and 0 % but in between the sound has a very thin
+tail". Base noise seems always audible unaffected → wants control. FX "feel flat… don't make the changes I'd expect".
+"Overall, good direction, but needs some serious rework" — make every setting based on best knowledge of drums, feedback
+synthesis, intuitive / practical / clean synth design.
+**Diagnosis (verified in code):** no loop-time control (loop = 1/pitch only); output tapped the raw delay line (dry burst
+audible); dry/wet mix INSIDE a loop interferes on every pass (thin tail); saturate/fold normalised to unity small-signal gain
+with a low loop level (flat); picker had no Off. Plan + modulation opinion: `docs/SANE_V02_PLAN.md`.

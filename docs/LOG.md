@@ -421,3 +421,6 @@ bottom row above the keyboard". "Enjoy the task! ^^"
 7. Soft-hit test measured the soft hit on top of the loud hit's tail, and used peak (misleading with many modes) → fresh
    instance + energy over 300 ms.
 8. CPU: per-sample sin/cos in freq shift / ring mod / chorus → phasor + polynomial sine (small gain). Extreme patch ~83 %.
+- Mockup 3 published (same canvas, right board): new exciter (drawn A/H/D envelope, Lock/Random, 3-band tone), Dyn EQ as a slot +
+  output EQ tab, modulation row above the keyboard (VEL, KEY, RANDOM, ENV 1-2, LFO 1-4, MOD WHEEL, PRESSURE; editor; link list),
+  knobs show white modulation rings. Row heights: 392 / 246 / 122 + keys 46 (fits 880 px).

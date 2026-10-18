@@ -11,7 +11,9 @@ in the picker, per-type knob defaults, in-loop freq shift / chorus / ring mod al
 loop level calibrated to ~1.0 (saturate / fold bite), velocity = loudness / position = timbre, hover help on every control,
 middle-click = default, INIT button, bigger / darker text. Tests: all pass (`tools/SaneTests.cpp`, v0.2 section).
 CPU (Linux): default 12 voices ~28 %; extreme (Partials, 5 slots incl. freq shift + chorus, 12 voices) ~83 % → optimise in v0.3.
-**Next:** mockup 3 (exciter envelope + lock/random + 3-band tone, 5-band dynamic EQ, modulation row above the keys) → build.
+**Mockup 3** (right board on the canvas, `docs/mockups/sane/V3.dc.html`): exciter envelope + lock/random + 3-band tone,
+Dyn EQ slot + output EQ (tab next to HIT), modulation row above the keys (11 sources, editor, link list, white rings on knobs).
+The per-note "velocity → X" bars are gone (replaced by modulation). **Next:** user verdict on mockup 3 → build v0.3.
 
 ### What to listen for (v0.2.0) — the "FX feel flat" checklist
 1. **INIT** first. One Membrane hit = the plain loop. Now add one slot at a time and compare with INIT.

@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sane mockup 3</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&amp;family=IBM+Plex+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sane{font-family:'Archivo',system-ui,sans-serif;font-stretch:88%;color:#121110}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-stretch:100%}
+.ttl{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;line-height:1;white-space:nowrap}
+.ttl::before{content:'';width:8px;height:8px;background:#121110;display:inline-block}
+.lbl{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#2a251c}
+.val{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:12px;font-weight:600;color:#121110}
+.chip{font-family:inherit;font-stretch:88%;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;border:1.5px solid #121110;background:transparent;color:#121110;padding:5px 8px 4px;cursor:pointer;line-height:1;border-radius:0;white-space:nowrap}
+.chip:hover{background:rgba(246,243,234,.35)}
+.chip.on{background:#F6F3EA}
+.chip.ink{background:#121110;color:#F6F3EA}
+.chip.dis{border-style:dashed;color:#5A5040;cursor:default;background:transparent}
+.cell{background:#BDAE8B;box-sizing:border-box;padding:12px 13px;display:flex;flex-direction:column;position:relative;min-width:0}
+.disp{background:#7E705A;position:relative;overflow:hidden}
+.dlbl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;color:rgba(246,243,234,.95);position:absolute;white-space:nowrap;pointer-events:none}
+.new{position:absolute;font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;background:#121110;color:#F6F3EA;padding:2px 5px;letter-spacing:.05em}
+svg .tr{fill:none;stroke:#F6F3EA;stroke-width:1.5}
+svg .tr2{fill:none;stroke:#F6F3EA;stroke-width:2.2}
+svg .dim{fill:none;stroke:rgba(246,243,234,.32);stroke-width:1}
+svg .fil{fill:rgba(246,243,234,.24);stroke:none}
+svg .sol{fill:#F6F3EA;stroke:none}
+svg .blk{fill:#121110;stroke:#F6F3EA;stroke-width:1.2;cursor:grab}
+svg .bk{fill:none;stroke:#121110;stroke-width:2}
+svg .bkd{fill:none;stroke:rgba(18,17,16,.55);stroke-width:1.3;stroke-dasharray:3 3}
+svg .ghost{fill:none;stroke:rgba(18,17,16,.45);stroke-width:1.1}
+svg .dash{fill:none;stroke:#F6F3EA;stroke-width:1.2;stroke-dasharray:4 4}
+svg .ink{fill:none;stroke:#121110;stroke-width:3}
+svg .ink1{fill:none;stroke:#121110;stroke-width:1.5}
+svg .inkf{fill:#121110;stroke:none}
+svg .trk{fill:none;stroke:rgba(18,17,16,.2);stroke-width:3}
+svg .modr{fill:none;stroke:#F6F3EA;stroke-width:4;stroke-linecap:butt}
+svg .modr2{fill:none;stroke:rgba(246,243,234,.45);stroke-width:4}
+.slot{position:absolute;width:96px;height:50px;box-sizing:border-box;border:1.5px solid #121110;padding:3px 4px;text-align:left;font-family:inherit;font-stretch:88%;color:#121110;display:flex;flex-direction:column;gap:2px;background:#BDAE8B;border-radius:0;cursor:pointer}
+.slot.on{background:#F6F3EA;outline:3px solid #121110}
+.slot.empty{border-style:dashed;align-items:center;justify-content:center}
+.mchip{box-sizing:border-box;border:1.5px solid #121110;background:#BDAE8B;width:76px;height:46px;padding:3px 5px;display:flex;flex-direction:column;justify-content:space-between;cursor:grab;font-family:inherit;font-stretch:88%;text-align:left;color:#121110;border-radius:0}
+.mchip.on{background:#F6F3EA;outline:3px solid #121110}
+.wkey{position:absolute;top:0;height:40px;box-sizing:border-box;border:1.5px solid #121110;border-right:none;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;padding-bottom:2px;cursor:pointer;background:transparent;transition:background .5s ease-out;user-select:none}
+.wkey.held{background:#F6F3EA;transition:none}
+.bkey{position:absolute;top:0;height:24px;width:14px;background:#121110;box-sizing:border-box;cursor:pointer;transition:background .5s ease-out;border:1.5px solid #121110}
+.bkey.held{background:#F6F3EA;transition:none}
+.lnk{display:grid;grid-template-columns:1fr 110px 44px;gap:6px;align-items:center;font-size:11px}
+.lbar{position:relative;height:8px;border:1.5px solid #121110;box-sizing:border-box}
+.lfill{position:absolute;top:0;bottom:0;background:#121110}
+.lmid{position:absolute;top:-3px;bottom:-3px;left:53px;width:1.5px;background:#121110}
+</style>
+</helmet>
+<div class="sane" style="width: 1280px; height: 880px; background: #121110; display: flex; flex-direction: column; gap: 2px; padding: 2px; box-sizing: border-box">
+
+<!-- HEADER -->
+<header style="height: 62px; background: #BDAE8B; display: flex; align-items: center; gap: 14px; padding: 0 14px; flex-shrink: 0">
+  <div style="font-size: 40px; font-weight: 900; font-stretch: 70%; line-height: 1">SANE</div>
+  <div style="display: flex; flex-direction: column; gap: 2px"><span class="lbl">feedback drums</span><span class="mono" style="font-size: 10px; color: #2a251c">v0.3 mockup · build —</span></div>
+  <button class="chip" style="margin-left: 14px; height: 32px">init</button>
+  <div style="display: flex; align-items: center; border: 1.5px solid #121110; height: 32px">
+    <button class="chip" style="border: none; border-right: 1.5px solid #121110; height: 100%" aria-label="Previous preset">◀</button>
+    <div style="padding: 0 12px; min-width: 190px"><span class="lbl" style="font-size: 9px; display: block">preset</span><span style="font-size: 13px; font-weight: 800; letter-spacing: .06em">INIT</span></div>
+    <button class="chip" style="border: none; border-left: 1.5px solid #121110; height: 100%" aria-label="Next preset">▶</button>
+  </div>
+  <div style="flex-grow: 1"></div>
+  <span class="lbl">keys</span><button class="chip on">tuned</button><button class="chip dis">kit · later</button>
+  <button class="chip dis" style="margin-left: 10px">link · later</button>
+  <button class="chip" style="margin-left: 10px">skin</button>
+  <span class="lbl" style="margin-left: 8px">window</span><button class="chip">−</button><span class="val">90 %</span><button class="chip">+</button>
+</header>
+
+<!-- ROW 1 -->
+<div style="display: grid; grid-template-columns: 298px 558px 416px; gap: 2px; height: 392px; flex-shrink: 0">
+
+  <!-- EXCITER -->
+  <section class="cell" style="gap: 6px">
+    <div style="display: flex; align-items: center; gap: 6px"><span class="ttl">Exciter</span><div style="flex-grow: 1"></div><button class="chip on">noise</button><button class="chip dis">audio in · later</button></div>
+    <div class="disp" style="width: 272px; height: 96px; touch-action: none" onPointerMove="{{envMove}}" onPointerUp="{{dragEnd}}" onPointerLeave="{{dragEnd}}">
+      <svg width="272" height="96" viewBox="0 0 272 96" aria-hidden="true">
+        <path class="dim" d="M 0 60 H 272"></path>
+        <sc-if value="{{isRandom}}" hint-placeholder-val="{{true}}"><path class="ghost" d="{{exc.ghosts}}"></path></sc-if>
+        <path class="tr" d="{{exc.wave}}"></path>
+        <path class="bk" d="{{exc.env}}"></path>
+        <rect class="blk" x="{{exc.ax}}" y="6" width="10" height="10" onPointerDown="{{grabA}}"></rect>
+        <rect class="blk" x="{{exc.hx}}" y="6" width="10" height="10" onPointerDown="{{grabH}}"></rect>
+        <rect class="blk" x="{{exc.dx}}" y="{{exc.dy}}" width="10" height="10" onPointerDown="{{grabD}}"></rect>
+      </svg>
+      <span class="dlbl" style="left: 6px; bottom: 3px">attack {{exc.aTxt}} · hold {{exc.hTxt}} · decay {{exc.dTxt}}</span>
+      <span class="new" style="right: 4px; top: 4px">NEW · drag ■ envelope</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 4px">
+      <span class="lbl" style="width: 44px">noise</span>
+      <sc-for list="{{noiseChips}}" as="c" hint-placeholder-count="2"><button class="chip {{c.cls}}" onClick="{{c.pick}}">{{c.label}}</button></sc-for>
+      <div style="flex-grow: 1"></div>
+      <span class="mono" style="font-size: 10.5px">{{noiseInfo}}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between">
+      <sc-for list="{{excKnobs}}" as="k" hint-placeholder-count="4">
+        <div style="width: 64px; display: flex; flex-direction: column; align-items: center"><span class="lbl" style="font-size: 10px">{{k.label}}</span>
+          <svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><path class="trk" d="{{k.track}}"></path><path class="{{k.mcls}}" d="{{k.mod}}"></path><path class="ink" d="{{k.val}}"></path><path class="ink1" d="{{k.ptr}}"></path></svg>
+          <span class="val" style="font-size: 11px">{{k.text}}</span></div>
+      </sc-for>
+    </div>
+    <div style="display: flex; align-items: center; gap: 6px; border-top: 1.5px solid #121110; padding-top: 6px"><span class="ttl" style="font-size: 11.5px">tone</span><span class="mono" style="font-size: 10px; color: #2a251c">3-band filter on the noise, before the loop</span></div>
+    <div class="disp" style="width: 272px; height: 50px">
+      <svg width="272" height="50" viewBox="0 0 272 50" aria-hidden="true"><path class="dim" d="M 0 25 H 272"></path><path class="fil" d="{{tone.fill}}"></path><path class="tr2" d="{{tone.curve}}"></path></svg>
+      <span class="new" style="right: 4px; top: 4px">NEW</span>
+    </div>
+    <div style="display: flex; justify-content: space-between">
+      <sc-for list="{{toneKnobs}}" as="k" hint-placeholder-count="4">
+        <div style="width: 64px; display: flex; flex-direction: column; align-items: center"><span class="lbl" style="font-size: 10px">{{k.label}}</span>
+          <svg width="40" height="40" viewBox="0 0 46 46" aria-hidden="true"><path class="trk" d="{{k.track}}"></path><path class="ink" d="{{k.val}}"></path><path class="ink1" d="{{k.ptr}}"></path></svg>
+          <span class="val" style="font-size: 11px">{{k.text}}</span></div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- LOOP -->
+  <section class="cell" style="gap: 4px">
+    <div style="display: flex; align-items: center; gap: 6px"><span class="ttl">Loop</span><span class="lbl" style="margin-left: 8px">core</span>
+      <button class="chip on">membrane</button><button class="chip">partials</button><button class="chip">delay</button>
+      <div style="flex-grow: 1"></div><span class="lbl">decay</span><span class="val">1.60 s</span></div>
+    <div style="display: flex; align-items: center; gap: 6px"><span class="lbl" style="width: 62px">time</span>
+      <button class="chip">keys</button><button class="chip">hz</button><button class="chip">ms</button><button class="chip on">bpm</button>
+      <span class="mono" style="font-size: 11px; margin-left: 8px">1/8 · follows FL tempo · key track 0 %</span></div>
+    <div style="position: relative; width: 532px; height: 236px">
+      <svg width="532" height="236" viewBox="0 0 532 236" style="position: absolute; left: 0; top: 0" aria-hidden="true">
+        <ellipse class="ink" cx="266" cy="122" rx="200" ry="86"></ellipse>
+        <rect class="inkf" x="248" y="25" width="36" height="22"></rect>
+        <circle cx="266" cy="122" r="44" fill="#7E705A" stroke="#121110" stroke-width="2"></circle>
+      </svg>
+      <span class="mono" style="position: absolute; left: 248px; top: 28px; width: 36px; text-align: center; color: #F6F3EA; font-size: 13px; font-weight: 600">Σ</span>
+      <span class="lbl" style="position: absolute; left: 196px; top: 6px; width: 140px; text-align: center">hit in · sound out</span>
+      <span style="position: absolute; left: 222px; top: 114px; width: 88px; text-align: center; color: #F6F3EA; font-size: 10px; font-weight: 800; letter-spacing: .12em">MEMBRANE · 8</span>
+      <sc-for list="{{slots}}" as="s" hint-placeholder-count="7">
+        <button class="slot {{s.cls}}" style="left: {{s.left}}px; top: {{s.top}}px" onClick="{{s.pick}}">
+          <span style="font-size: 9.5px; font-weight: 800; letter-spacing: .06em">{{s.num}} {{s.name}}</span>
+          <span class="mono" style="font-size: 9px; font-weight: 600">{{s.place}}</span>
+        </button>
+      </sc-for>
+    </div>
+    <div style="display: flex; align-items: flex-end; justify-content: space-between">
+      <sc-for list="{{loopKnobs}}" as="k" hint-placeholder-count="7">
+        <div style="width: 74px; display: flex; flex-direction: column; align-items: center"><span class="lbl" style="font-size: 10px">{{k.label}}</span>
+          <svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><path class="trk" d="{{k.track}}"></path><path class="{{k.mcls}}" d="{{k.mod}}"></path><path class="ink" d="{{k.val}}"></path><path class="ink1" d="{{k.ptr}}"></path></svg>
+          <span class="val" style="font-size: 11px">{{k.text}}</span></div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- MODES (unchanged, compacted) -->
+  <section class="cell" style="gap: 6px">
+    <div style="display: flex; align-items: center; gap: 4px"><span class="ttl">Modes</span><div style="flex-grow: 1"></div>
+      <button class="chip on" style="font-size: 9.5px; padding: 4px 5px 3px">membrane</button><button class="chip" style="font-size: 9.5px; padding: 4px 5px 3px">timpani</button><button class="chip" style="font-size: 9.5px; padding: 4px 5px 3px">tabla</button><button class="chip" style="font-size: 9.5px; padding: 4px 5px 3px">bar</button><button class="chip" style="font-size: 9.5px; padding: 4px 5px 3px">plate</button></div>
+    <div class="disp" style="width: 390px; height: 184px">
+      <svg width="390" height="184" viewBox="0 0 390 184" aria-hidden="true"><path class="dim" d="M 14 110 H 376"></path><path class="tr2" d="{{modesLvl}}"></path><path class="bk" d="{{modesDec}}"></path></svg>
+      <span class="dlbl" style="left: 6px; top: 6px">level ▲ · decay ▼</span>
+    </div>
+    <div style="display: flex; gap: 4px; align-items: center"><span style="width: 30px; font-weight: 900; font-size: 12px">A ◆</span><button class="chip on">physical</button><button class="chip">calc</button><button class="chip">file</button><button class="chip">linked</button></div>
+    <div style="display: flex; gap: 4px; align-items: center"><span style="width: 30px; font-weight: 900; font-size: 12px">B ▲</span><button class="chip">physical</button><button class="chip on">calc</button><button class="chip">file</button><button class="chip">linked</button></div>
+    <div style="display: flex; justify-content: space-between">
+      <sc-for list="{{modeKnobs}}" as="k" hint-placeholder-count="5">
+        <div style="width: 76px; display: flex; flex-direction: column; align-items: center"><span class="lbl" style="font-size: 10px">{{k.label}}</span>
+          <svg width="46" height="46" viewBox="0 0 46 46" aria-hidden="true"><path class="trk" d="{{k.track}}"></path><path class="{{k.mcls}}" d="{{k.mod}}"></path><path class="ink" d="{{k.val}}"></path><path class="ink1" d="{{k.ptr}}"></path></svg>
+          <span class="val" style="font-size: 11px">{{k.text}}</span></div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+
+<!-- ROW 2 -->
+<div style="display: grid; grid-template-columns: 298px 558px 416px; gap: 2px; height: 246px; flex-shrink: 0">
+  <section class="cell" style="gap: 6px">
+    <div style="display: flex; align-items: center"><span class="ttl">Strike</span><div style="flex-grow: 1"></div><span class="mono" style="font-size: 10px">click the head</span></div>
+    <div class="disp" style="width: 272px; height: 132px">
+      <svg width="272" height="132" viewBox="0 0 272 132" aria-hidden="true"><circle class="tr2" cx="136" cy="66" r="56"></circle><circle class="dim" cx="136" cy="66" r="24.4"></circle><path class="dim" d="M 80 66 H 192"></path><path class="bk" d="M 150 52 L 172 30" style="stroke-width: 3"></path><rect x="146" y="48" width="9" height="9" fill="#121110" stroke="#F6F3EA" stroke-width="1.2"></rect></svg>
+      <span class="dlbl" style="left: 6px; top: 4px">line = where hits land (from the modulators)</span>
+    </div>
+    <div style="display: flex; justify-content: space-around">
+      <sc-for list="{{strikeKnobs}}" as="k" hint-placeholder-count="3">
+        <div style="width: 74px; display: flex; flex-direction: column; align-items: center"><span class="lbl" style="font-size: 10px">{{k.label}}</span>
+          <svg width="40" height="40" viewBox="0 0 46 46" aria-hidden="true"><path class="trk" d="{{k.track}}"></path><path class="{{k.mcls}}" d="{{k.mod}}"></path><path class="ink" d="{{k.val}}"></path><path class="ink1" d="{{k.ptr}}"></path></svg>
+          <span class="val" style="font-size: 11px">{{k.text}}</span></div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section class="cell" style="gap: 6px">
+    <div style="display: flex; align-items: center; gap: 6px"><span class="ttl">Slot 4 · Dyn EQ</span><button class="chip">type ▾</button><button class="chip">× remove</button><div style="flex-grow: 1"></div><span class="lbl">runs</span><button class="chip on">in loop</button><button class="chip">after loop</button></div>
+    <div class="disp" style="width: 532px; height: 128px">
+      <svg width="532" height="128" viewBox="0 0 532 128" aria-hidden="true"><path class="fil" d="{{seq.spec}}"></path><path class="dim" d="M 0 64 H 532"></path><path class="tr2" d="{{seq.curve}}"></path><path class="sol" d="{{seq.nodes}}"></path><path class="bk" d="{{seq.dyn}}"></path></svg>
+      <span class="dlbl" style="left: 8px; top: 5px">5-band dynamic EQ IN the loop: every pass shapes the ring (black bars = how far each band moves with level)</span>
+      <span class="new" style="right: 6px; bottom: 6px">NEW slot type</span>
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center"><sc-for list="{{bandChips}}" as="c" hint-placeholder-count="5"><button class="chip {{c.cls}}" onClick="{{c.pick}}">{{c.label}}</button></sc-for>
+      <span class="mono" style="font-size: 11px; margin-left: 6px">{{bandInfo}}</span></div>
+  </section>
+
+  <section class="cell" style="gap: 6px">
+    <div style="display: flex; align-items: center; gap: 4px"><sc-for list="{{tabs}}" as="t" hint-placeholder-count="2"><button class="chip {{t.cls}}" onClick="{{t.pick}}">{{t.label}}</button></sc-for><div style="flex-grow: 1"></div><span class="mono" style="font-size: 10.5px">{{tabInfo}}</span></div>
+    <sc-if value="{{isEq}}" hint-placeholder-val="{{true}}">
+      <div class="disp" style="width: 390px; height: 170px; touch-action: none" onPointerMove="{{eqMove}}" onPointerUp="{{dragEnd}}" onPointerLeave="{{dragEnd}}">
+        <svg width="390" height="170" viewBox="0 0 390 170" aria-hidden="true">
+          <path class="dim" d="{{eq.grid}}"></path><path class="fil" d="{{eq.fill}}"></path><path class="tr2" d="{{eq.curve}}"></path><path class="bk" d="{{eq.dyn}}"></path>
+          <sc-for list="{{eq.nodes}}" as="n" hint-placeholder-count="5"><rect class="blk" x="{{n.x}}" y="{{n.y}}" width="12" height="12" onPointerDown="{{n.grab}}"></rect></sc-for>
+        </svg>
+        <span class="dlbl" style="left: 8px; top: 5px">OUTPUT EQ · drag ■ · bars = dynamic range</span>
+        <sc-for list="{{eq.labels}}" as="l" hint-placeholder-count="5"><span class="dlbl" style="left: {{l.x}}px; top: 152px">{{l.t}}</span></sc-for>
+        <span class="new" style="right: 6px; top: 5px">NEW</span>
+      </div>
+      <span class="mono" style="font-size: 10.5px; color: #2a251c">band {{eqSel}} · {{eqSelInfo}}</span>
+    </sc-if>
+    <sc-if value="{{isHit}}" hint-placeholder-val="{{false}}">
+      <div class="disp" style="width: 390px; height: 170px">
+        <svg width="390" height="170" viewBox="0 0 390 170" aria-hidden="true"><path class="fil" d="{{hitWave}}"></path><path class="bk" d="M 0 30 C 40 120, 90 140, 390 140"></path><rect x="1" y="25" width="11" height="11" fill="#121110" stroke="#F6F3EA"></rect></svg>
+        <span class="dlbl" style="left: 8px; top: 5px">HIT · last waveform, pitch drop (black), length — as in v0.2</span>
+      </div>
+    </sc-if>
+  </section>
+</div>
+
+<!-- ROW 3: MODULATION (above the keyboard) -->
+<section style="height: 122px; background: #BDAE8B; display: flex; gap: 14px; padding: 8px 13px; box-sizing: border-box; flex-shrink: 0">
+  <div style="display: flex; flex-direction: column; gap: 6px; width: 520px">
+    <div style="display: flex; align-items: center; gap: 8px"><span class="ttl">Modulation</span><span class="mono" style="font-size: 10px; color: #2a251c">drag a chip onto ANY knob · white ring = range</span></div>
+    <div style="display: grid; grid-template-columns: repeat(6, 76px); gap: 6px 8px">
+      <sc-for list="{{mods}}" as="m" hint-placeholder-count="11">
+        <button class="mchip {{m.cls}}" onClick="{{m.pick}}">
+          <span style="font-size: 10px; font-weight: 900; letter-spacing: .06em">{{m.name}}</span>
+          <svg width="64" height="18" viewBox="0 0 64 18" aria-hidden="true"><path class="ink1" d="{{m.icon}}"></path></svg>
+        </button>
+      </sc-for>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 5px; width: 340px; border-left: 1.5px solid #121110; padding-left: 12px">
+    <div style="display: flex; align-items: center; gap: 6px"><span class="lbl" style="color: #121110">{{modTitle}}</span><div style="flex-grow: 1"></div><span class="mono" style="font-size: 10.5px">{{modSub}}</span></div>
+    <div class="disp" style="width: 328px; height: 76px">
+      <svg width="328" height="76" viewBox="0 0 328 76" aria-hidden="true"><path class="dim" d="M 0 38 H 328"></path><path class="tr2" d="{{modShape}}"></path></svg>
+      <span class="dlbl" style="left: 6px; bottom: 3px">{{modHint}}</span>
+    </div>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 6px; flex-grow: 1; border-left: 1.5px solid #121110; padding-left: 12px">
+    <span class="lbl" style="color: #121110">{{modName}} drives</span>
+    <sc-for list="{{links}}" as="l" hint-placeholder-count="3">
+      <div class="lnk"><span style="font-weight: 700">{{l.target}}</span><div class="lbar"><div class="lfill" style="left: {{l.left}}px; width: {{l.width}}px"></div><div class="lmid"></div></div><span class="val" style="font-size: 11px; text-align: right">{{l.amt}}</span></div>
+    </sc-for>
+  </div>
+</section>
+
+<!-- KEYS -->
+<div style="height: 46px; background: #BDAE8B; display: flex; align-items: center; gap: 12px; padding: 0 13px; flex-shrink: 0">
+  <div style="width: 116px; display: flex; flex-direction: column; gap: 2px"><span class="lbl" style="color: #121110">tuned · 12-edo</span><span class="mono" style="font-size: 9.5px; color: #2a251c">click = hit</span></div>
+  <div style="position: relative; width: 1120px; height: 40px; border-right: 1.5px solid #121110">
+    <sc-for list="{{whites}}" as="w" hint-placeholder-count="21"><div class="wkey {{w.cls}}" style="left: {{w.left}}px; width: {{w.w}}px" onPointerDown="{{w.down}}" onPointerUp="{{keyUp}}" onPointerLeave="{{keyUp}}"><span class="mono" style="font-size: 9px; font-weight: 600; pointer-events: none">{{w.lab}}</span></div></sc-for>
+    <sc-for list="{{blacks}}" as="b" hint-placeholder-count="15"><div class="bkey {{b.cls}}" style="left: {{b.left}}px" onPointerDown="{{b.down}}" onPointerUp="{{keyUp}}" onPointerLeave="{{keyUp}}"></div></sc-for>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":880}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { random: true, a: 0.4, h: 1.5, d: 6, drag: null, mod: 'VEL', tab: 'EQ', eqSel: 2, band: 2,
+      eq: [ { f: 60, g: 3, dyn: 0 }, { f: 220, g: -4, dyn: 6 }, { f: 900, g: 2, dyn: -5 }, { f: 3200, g: 4, dyn: 0 }, { f: 9000, g: -6, dyn: 0 } ], held: -1, slot: 3 };
+  }
+  rng(seed) { let a = seed >>> 0; return function () { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  P(pts) { return pts.map(function (p, i) { return (i ? 'L ' : 'M ') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' '); }
+  knob(label, v, text, mod) {
+    const c = 23, R = 17, a0 = 0.75 * Math.PI, span = 1.5 * Math.PI;
+    const a1 = a0 + span * Math.max(0.002, Math.min(1, v));
+    const pt = function (a, r) { return [c + r * Math.cos(a), c + r * Math.sin(a)]; };
+    const arc = function (from, to, r) { const p = pt(from, r), q = pt(to, r); const large = (to - from) > Math.PI ? 1 : 0;
+      return 'M ' + p[0].toFixed(2) + ' ' + p[1].toFixed(2) + ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + q[0].toFixed(2) + ' ' + q[1].toFixed(2); };
+    const tip = pt(a1, R - 7);
+    let modPath = '', mcls = 'modr2';
+    if (mod) {
+      const lo = a0 + span * Math.max(0, Math.min(1, v + Math.min(0, mod.amt))), hi = a0 + span * Math.max(0, Math.min(1, v + Math.max(0, mod.amt)));
+      modPath = arc(lo, Math.max(lo + 0.01, hi), R + 4.5);
+      mcls = mod.src === this.state.mod ? 'modr' : 'modr2';
+    }
+    return { label: label, text: text, track: arc(a0, a0 + span, R), val: arc(a0, a1, R), ptr: 'M ' + c + ' ' + c + ' L ' + tip[0].toFixed(2) + ' ' + tip[1].toFixed(2), mod: modPath, mcls: mcls };
+  }
+  exciter() {
+    const st = this.state, W = 272, base = 60, top = 14;
+    const T = 20; // ms shown
+    const X = function (ms) { return ms / T * W; };
+    const env = function (t) { if (t < st.a) return t / st.a; if (t < st.a + st.h) return 1; return Math.exp(-(t - st.a - st.h) / (st.d * 0.4)); };
+    const burst = function (seed) { const R = this.rng(seed); let lp = 0; const pts = []; for (let i = 0; i <= 200; i++) { const t = i / 200 * T; lp += 0.45 * ((R() * 2 - 1) - lp); pts.push([X(t), base - 18 - lp * 34 * env(t)]); } return this.P(pts); }.bind(this);
+    const envPts = []; for (let i = 0; i <= 120; i++) { const t = i / 120 * T; envPts.push([X(t), base - 6 - env(t) * (base - top - 6)]); }
+    const ghosts = burst(11) + ' ' + burst(23) + ' ' + burst(37);
+    return { wave: burst(st.random ? 91 : 5), ghosts: ghosts, env: this.P(envPts),
+      ax: (X(st.a) - 5).toFixed(1), hx: (X(st.a + st.h) - 5).toFixed(1), dx: (X(st.a + st.h + st.d) - 5).toFixed(1), dy: (base - 6 - Math.exp(-2.5) * (base - top - 6) - 5).toFixed(1),
+      aTxt: st.a.toFixed(1) + ' ms', hTxt: st.h.toFixed(1) + ' ms', dTxt: st.d.toFixed(1) + ' ms' };
+  }
+  eqData() {
+    const st = this.state, W = 390, H = 170, top = 18, bot = H - 22;
+    const X = function (f) { return Math.log(f / 20) / Math.log(1000) * W; };
+    const Y = function (db) { return (top + bot) / 2 - db / 18 * (bot - top) / 2; };
+    const gain = function (f, bands, extra) {
+      let g = 0;
+      bands.forEach(function (b, i) { const gg = b.g + (extra ? b.dyn : 0); const x = Math.log2(f / b.f);
+        if (i === 0) g += gg / (1 + Math.exp(x * 4)); else if (i === 4) g += gg / (1 + Math.exp(-x * 4)); else g += gg * Math.exp(-x * x * 1.6); });
+      return g;
+    };
+    const pts = [], fill = [];
+    for (let i = 0; i <= 160; i++) { const f = 20 * Math.pow(1000, i / 160); pts.push([X(f), Y(gain(f, st.eq, false))]); }
+    let dyn = '';
+    const self = this;
+    const nodes = st.eq.map(function (b, i) {
+      const x = X(b.f), y = Y(b.g);
+      if (b.dyn !== 0) dyn += 'M ' + x.toFixed(1) + ' ' + y.toFixed(1) + ' V ' + Y(b.g + b.dyn).toFixed(1) + ' ';
+      return { x: (x - 6).toFixed(1), y: (y - 6).toFixed(1), grab: function (e) { e.stopPropagation(); self.setState({ drag: 'eq' + i, eqSel: i + 1 }); } };
+    });
+    let grid = '';
+    [100, 1000, 10000].forEach(function (f) { grid += 'M ' + X(f).toFixed(1) + ' 0 V ' + H + ' '; });
+    grid += 'M 0 ' + Y(0).toFixed(1) + ' H ' + W;
+    const R = this.rng(5);
+    const spec = []; for (let i = 0; i <= 120; i++) { const u = i / 120; let v = 0.75 - 0.55 * u + (R() - 0.5) * 0.08; spec.push([u * W, bot - (bot - top) * Math.max(0.03, v) * 0.8]); }
+    return { curve: this.P(pts), fill: this.P(spec) + ' L ' + W + ' ' + H + ' L 0 ' + H + ' Z', dyn: dyn, nodes: nodes, grid: grid,
+      labels: [{ x: (X(100) + 3).toFixed(0), t: '100' }, { x: (X(1000) + 3).toFixed(0), t: '1k' }, { x: (X(10000) + 3).toFixed(0), t: '10k' }], X: X, Y: Y };
+  }
+  renderVals() {
+    const self = this, st = this.state;
+    const MODS = [
+      { id: 'VEL', name: 'VELOCITY', icon: 'M 2 16 L 62 2', title: 'VELOCITY (per hit)', sub: 'no settings', hint: 'how hard the key was hit: 0 .. 1', shape: 'M 0 72 L 328 4' },
+      { id: 'KEY', name: 'KEY', icon: 'M 2 16 L 12 16 L 12 12 L 22 12 L 22 8 L 32 8 L 32 4 L 62 4', title: 'KEY (per hit)', sub: 'centre C4', hint: 'which key: low keys - .. high keys +', shape: 'M 0 72 L 82 55 L 164 38 L 246 21 L 328 4' },
+      { id: 'RAND', name: 'RANDOM', icon: 'M 2 12 L 10 12 M 12 4 L 20 4 M 22 15 L 30 15 M 32 8 L 40 8 M 42 13 L 50 13 M 52 6 L 62 6', title: 'RANDOM (new value every hit)', sub: 'humanise', hint: 'a fresh random value per note: every hit slightly different', shape: 'M 0 50 H 40 M 50 20 H 90 M 100 62 H 140 M 150 30 H 190 M 200 44 H 240 M 250 14 H 290 M 300 56 H 328' },
+      { id: 'ENV1', name: 'ENV 1', icon: 'M 2 16 L 8 2 L 62 15', title: 'ENVELOPE 1 (per hit, drawn)', sub: 'attack 2 ms · decay 300 ms', hint: 'draw it: e.g. a freq shift that sweeps while the drum rings', shape: 'M 0 72 L 16 4 C 60 40, 120 64, 328 70' },
+      { id: 'ENV2', name: 'ENV 2', icon: 'M 2 16 L 30 2 L 62 16', title: 'ENVELOPE 2 (per hit, drawn)', sub: 'slow swell', hint: 'a second drawn envelope', shape: 'M 0 72 C 100 70, 140 4, 200 4 L 328 72' },
+      { id: 'LFO1', name: 'LFO 1', icon: 'M 2 9 C 10 -2, 18 -2, 26 9 S 42 20, 50 9 S 58 2, 62 6', title: 'LFO 1 (drawn, Hz or BPM)', sub: '1/4 · retrigger on hit', hint: 'drawn shape, Hz or tempo synced, free or restarted by each hit', shape: 'M 0 38 C 40 0, 80 0, 82 38 S 124 76, 164 38 S 206 0, 246 38 S 288 76, 328 38' },
+      { id: 'LFO2', name: 'LFO 2', icon: 'M 2 16 L 32 2 L 32 16 L 62 2', title: 'LFO 2', sub: '0.3 Hz · free', hint: '', shape: 'M 0 72 L 164 4 L 164 72 L 328 4' },
+      { id: 'LFO3', name: 'LFO 3', icon: 'M 2 16 L 2 4 L 22 4 L 22 16 L 42 16 L 42 4 L 62 4', title: 'LFO 3', sub: 'unused', hint: '', shape: 'M 0 72 V 4 H 82 V 72 H 164 V 4 H 246 V 72 H 328' },
+      { id: 'LFO4', name: 'LFO 4', icon: 'M 2 9 L 62 9', title: 'LFO 4', sub: 'unused', hint: '', shape: 'M 0 38 H 328' },
+      { id: 'WHEEL', name: 'MOD WHEEL', icon: 'M 2 16 L 62 16 M 30 16 L 30 4', title: 'MOD WHEEL', sub: 'live', hint: 'your controller\'s mod wheel', shape: 'M 0 60 H 328' },
+      { id: 'PRESS', name: 'PRESSURE', icon: 'M 2 16 C 20 16, 30 4, 62 4', title: 'PRESSURE (aftertouch)', sub: 'live', hint: 'press harder while holding: e.g. squeeze the head like a talking drum', shape: 'M 0 72 C 120 72, 160 4, 328 4' }
+    ];
+    const LINKS = {
+      VEL: [['Strike position', -0.4], ['Exciter → loop', 0.5], ['Saturate drive', 0.3]],
+      KEY: [['Exciter colour', 0.3], ['Strike position', 0.25]],
+      RAND: [['Strike position', 0.1], ['Exciter colour', 0.15], ['Fine delay time', 0.05]],
+      ENV1: [['Freq shift amount', 0.6], ['Tension', 0.2]],
+      ENV2: [['Filter cutoff', -0.3]], LFO1: [['Coupling', 0.3]], LFO2: [['Morph A → B', 0.5]], LFO3: [], LFO4: [], WHEEL: [['Damp', 0.5]], PRESS: [['Tune (squeeze)', 0.4]]
+    };
+    const modOf = function (target) { let found = null; Object.keys(LINKS).forEach(function (k) { LINKS[k].forEach(function (l) { if (l[0] === target && (found === null || k === st.mod)) found = { src: k, amt: l[1] }; }); }); return found; };
+    const M = MODS.find(function (m) { return m.id === st.mod; });
+    const ex = this.exciter();
+    const eq = this.eqData();
+    const toLocal = function (e, W, H) { const b = e.currentTarget.getBoundingClientRect(); return [(e.clientX - b.left) / b.width * W, (e.clientY - b.top) / b.height * H]; };
+    // in-loop EQ graph for the slot editor
+    const sW = 532, sH = 128;
+    const sX = function (f) { return Math.log(f / 20) / Math.log(1000) * sW; };
+    const sBands = [[90, 4], [260, -6], [700, 3], [2400, -4], [7000, 2]];
+    let sCurve = []; for (let i = 0; i <= 160; i++) { const f = 20 * Math.pow(1000, i / 160); let g = 0; sBands.forEach(function (b) { const x = Math.log2(f / b[0]); g += b[1] * Math.exp(-x * x * 2); }); sCurve.push([sX(f), 64 - g * 4.5]); }
+    let sNodes = '', sDyn = '';
+    sBands.forEach(function (b, i) { const x = sX(b[0]), y = 64 - b[1] * 4.5; sNodes += 'M ' + (x - 5).toFixed(1) + ' ' + (y - 5).toFixed(1) + ' h 10 v 10 h -10 Z '; if (i === 1 || i === 3) sDyn += 'M ' + x.toFixed(1) + ' ' + y.toFixed(1) + ' V ' + (y + (i === 1 ? 22 : -18)).toFixed(1) + ' '; });
+    const R = this.rng(3); const spec = []; for (let i = 0; i <= 100; i++) { const u = i / 100; spec.push([u * sW, sH - (sH - 20) * Math.max(0.03, 0.7 - 0.5 * u + (R() - 0.5) * 0.1) * 0.8]); }
+    // keyboard
+    const names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const whites = [], blacks = []; const ww = 1120 / 21; let wi = 0;
+    for (let k = 0; k < 36; k++) { const black = names[k % 12].length > 1; const cls = st.held === k ? 'held' : '';
+      const down = (function (kk) { return function () { self.setState({ held: kk }); }; })(k);
+      if (!black) { whites.push({ left: (wi * ww).toFixed(1), w: (ww + 0.5).toFixed(1), lab: k % 12 === 0 ? 'C' + (2 + k / 12) : '', cls: cls, down: down }); wi++; }
+      else blacks.push({ left: (wi * ww - 7).toFixed(1), cls: cls, down: down }); }
+    const SL = [['1 FILTER', 'in loop'], ['2 DISPERSE', 'in loop'], ['3 SATURATE', 'in loop'], ['4 DYN EQ', 'in loop'], ['5 FREQ SHIFT', 'in loop'], ['6 SATURATE', 'after loop'], ['7 + ADD FX', '']];
+    const slots = SL.map(function (sl, i) { const ang = (-45 + i * 45) * Math.PI / 180;
+      return { num: '', name: sl[0], place: sl[1], left: (266 + 200 * Math.cos(ang) - 48).toFixed(0), top: (122 + 86 * Math.sin(ang) - 25).toFixed(0), cls: (st.slot === i ? 'on ' : '') + (i === 6 ? 'empty' : ''), pick: function () { self.setState({ slot: i }); } }; });
+    let modesLvl = '', modesDec = '';
+    [1, 1.59, 2.14, 2.3, 2.65, 2.92, 3.16, 3.5].forEach(function (r, i) { const x = 14 + Math.log2(r) / Math.log2(14) * 362, h = 90 * Math.pow(i + 1, -0.5); modesLvl += 'M ' + x.toFixed(1) + ' 110 V ' + (110 - h).toFixed(1) + ' '; modesDec += 'M ' + x.toFixed(1) + ' 116 V ' + (116 + 55 / (1 + i * 0.4)).toFixed(1) + ' '; });
+    const band = st.eq[st.eqSel - 1];
+    return {
+      isRandom: st.random,
+      noiseChips: [{ label: 'lock (same every hit)', cls: st.random ? '' : 'on', pick: function () { self.setState({ random: false }); } }, { label: 'random', cls: st.random ? 'on' : '', pick: function () { self.setState({ random: true }); } }],
+      noiseInfo: st.random ? 'amount 35 % · black = last 3 hits' : 'seed 4127 · dice ⟳',
+      exc: ex,
+      grabA: function (e) { e.stopPropagation(); self.setState({ drag: 'a' }); },
+      grabH: function (e) { e.stopPropagation(); self.setState({ drag: 'h' }); },
+      grabD: function (e) { e.stopPropagation(); self.setState({ drag: 'd' }); },
+      envMove: function (e) {
+        const d = self.state.drag; if (!d || d.indexOf('eq') === 0) return;
+        const p = toLocal(e, 272, 96); const ms = Math.max(0, p[0] / 272 * 20);
+        if (d === 'a') self.setState({ a: Math.max(0.05, Math.min(5, ms)) });
+        if (d === 'h') self.setState({ h: Math.max(0, Math.min(10, ms - self.state.a)) });
+        if (d === 'd') self.setState({ d: Math.max(0.3, Math.min(30, (ms - self.state.a - self.state.h) / 1.0)) });
+      },
+      dragEnd: function () { if (self.state.drag) self.setState({ drag: null }); },
+      excKnobs: [this.knob('colour', 0.45, '45 %', modOf('Exciter colour')), this.knob('grain', 0.15, '15 %', null), this.knob('→ loop', 0.6, '0.0 dB', modOf('Exciter → loop')), this.knob('direct', 0.3, '-30 dB', null)],
+      tone: (function () { const W = 272; const g = function (u) { return 6 * Math.exp(-Math.pow((u - 0.12) / 0.12, 2)) - 4 * Math.exp(-Math.pow((u - 0.5) / 0.15, 2)) + 5 / (1 + Math.exp(-(u - 0.82) * 18)); };
+        const pts = []; for (let i = 0; i <= 100; i++) { const u = i / 100; pts.push([u * W, 25 - g(u) * 2]); }
+        return { curve: self.P(pts), fill: self.P(pts) + ' L ' + W + ' 50 L 0 50 Z' }; })(),
+      toneKnobs: [this.knob('low', 0.65, '+6 dB'), this.knob('mid', 0.38, '-4 dB'), this.knob('mid freq', 0.5, '1.2 kHz'), this.knob('high', 0.62, '+5 dB')],
+      slots: slots,
+      loopKnobs: [this.knob('feedback', 0.65, '1.60 s', null), this.knob('damp', 0.4, '40 %', modOf('Damp')), this.knob('tension', 0.3, '1.5 st', modOf('Tension')), this.knob('coupling', 0.3, '30 %', modOf('Coupling')), this.knob('width', 0.5, '50 %', null), this.knob('time', 0.4, '1/8', null), this.knob('key track', 0.0, '0 %', null)],
+      modesLvl: modesLvl, modesDec: modesDec,
+      modeKnobs: [this.knob('morph', 0.3, '30 %', modOf('Morph A → B')), this.knob('seed', 0.43, '2.000', null), this.knob('rolloff', 0.18, '0.35', null), this.knob('tune', 0.5, '0 st', modOf('Tune (squeeze)')), this.knob('output', 0.8, '-3 dB', null)],
+      strikeKnobs: [this.knob('position', 0.4, '0.40', modOf('Strike position')), this.knob('hardness', 0.6, '60 %', null), this.knob('random', 0.2, '0.06', null)],
+      seq: { curve: this.P(sCurve), nodes: sNodes, dyn: sDyn, spec: this.P(spec) + ' L ' + sW + ' ' + sH + ' L 0 ' + sH + ' Z' },
+      bandChips: [1, 2, 3, 4, 5].map(function (b) { return { label: 'band ' + b, cls: st.band === b ? 'on' : '', pick: function () { self.setState({ band: b }); } }; }),
+      bandInfo: ['bell 90 Hz +4 dB', 'bell 260 Hz −6 dB · dyn +5 dB (opens with level)', 'bell 700 Hz +3 dB', 'bell 2.4 kHz −4 dB · dyn −4 dB', 'shelf 7 kHz +2 dB'][st.band - 1],
+      tabs: [{ label: 'hit', cls: st.tab === 'HIT' ? 'on' : '', pick: function () { self.setState({ tab: 'HIT' }); } }, { label: 'output eq', cls: st.tab === 'EQ' ? 'on' : '', pick: function () { self.setState({ tab: 'EQ' }); } }],
+      tabInfo: st.tab === 'EQ' ? '5 bands · dynamic' : 'last: vel 104 · C3',
+      isEq: st.tab === 'EQ', isHit: st.tab === 'HIT',
+      eq: eq, eqSel: st.eqSel,
+      eqSelInfo: Math.round(band.f) + ' Hz · ' + (band.g >= 0 ? '+' : '') + band.g.toFixed(1) + ' dB' + (band.dyn ? ' · dynamic ' + (band.dyn > 0 ? '+' : '') + band.dyn + ' dB' : ' · static'),
+      eqMove: function (e) {
+        const d = self.state.drag; if (!d || d.indexOf('eq') !== 0) return;
+        const i = Number(d.slice(2)); const p = toLocal(e, 390, 170);
+        const f = 20 * Math.pow(1000, Math.max(0, Math.min(1, p[0] / 390)));
+        const g = Math.max(-18, Math.min(18, -(p[1] - 85) / 65 * 18));
+        const arr = self.state.eq.slice(); arr[i] = Object.assign({}, arr[i], { f: f, g: Math.round(g * 10) / 10 }); self.setState({ eq: arr });
+      },
+      hitWave: (function () { const R = self.rng(9); const top = [], bot = []; for (let x = 0; x <= 390; x += 3) { const e = Math.exp(-x / 90); top.push([x, 85 - e * 70 * (0.6 + 0.4 * R())]); bot.push([x, 85 + e * 70 * (0.6 + 0.4 * R())]); } let d = self.P(top); for (let i = bot.length - 1; i >= 0; i--) d += ' L ' + bot[i][0] + ' ' + bot[i][1].toFixed(1); return d + ' Z'; })(),
+      mods: MODS.map(function (m) { return { name: m.name, icon: m.icon, cls: st.mod === m.id ? 'on' : '', pick: function () { self.setState({ mod: m.id }); } }; }),
+      modTitle: M.title, modSub: M.sub, modHint: M.hint, modShape: M.shape, modName: M.name,
+      links: (LINKS[st.mod] || []).map(function (l) { const x = 53 + l[1] * 53; return { target: l[0], amt: (l[1] > 0 ? '+' : '') + Math.round(l[1] * 100) + ' %', left: Math.min(53, x).toFixed(1), width: Math.abs(x - 53).toFixed(1) }; }),
+      whites: whites, blacks: blacks,
+      keyUp: function () { if (self.state.held !== -1) self.setState({ held: -1 }); }
+    };
+  }
+}
+</script>
+</body>
+</html>
